@@ -1,0 +1,14 @@
+{
+  "name": "dashboard-eleganza-academia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tablero financiero Eleganza Academia (Daniel Financiero): resultados reales del informe a socios vs plan 2027, datos cifrados con clave.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "seed": "node scripts/seed.mjs",
+    "test": "node scripts/test.mjs"
+  },
+  "devDependencies": {
+    "xlsx": "0.18.5"
+  }
+}
