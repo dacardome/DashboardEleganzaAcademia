@@ -153,27 +153,101 @@
     const optsSede = ['Todas'].concat(C.NOMBRES_SEDES).map(n => '<option' + (n === S.sede ? ' selected' : '') + ' value="' + esc(n) + '">' + (n === 'Todas' ? 'Todas las sedes' : esc(n)) + '</option>').join('');
     const optsEsc = Object.entries(C.ESCENARIOS).map(([k, t]) => '<option value="' + k + '"' + (k === S.esc ? ' selected' : '') + '>' + t + '</option>').join('');
     const V = vista();
-    $('#app').innerHTML =
-      '<header class="topbar"><div class="topbar-in">' + logo(false) +
-      '<div class="client"><b>Eleganza Academia</b><br>Tablero financiero</div>' +
-      '<div class="filters">' +
-      '<div class="field"><label for="fsede">Sede</label><select id="fsede">' + optsSede + '</select></div>' +
-      '<div class="field"><label for="fmes">Mes</label><select id="fmes">' + optsMes + '</select></div>' +
-      '<div class="field"><label for="fesc">Comparar con</label><select id="fesc">' + optsEsc + '</select></div>' +
-      '<span class="gchip-wrap">' + chipGuardado() + '</span><button class="btn small" id="bcargar">Cargar informe</button>' + (ds.params ? '<button class="btn ghost small" id="bparam">Parámetros</button>' : '') + '<button class="btn ghost small" id="bconf">Configuración</button></div></div>' +
-      '<nav class="navlinks"><a href="#s-res">Resultados</a>' + (ds.params ? '<a href="#s-cap">Capacidad</a><a href="#s-pre">Presupuesto vs ejecución</a>' : '') + '<a href="#s-ten">Tendencia</a><a href="#s-sed">Sedes</a><a href="#s-gas">Gastos</a><a href="#s-plan">Plan 2027</a>' + (ds.params ? '<a href="#s-dec">Decisiones 19-nov</a><a href="#s-nue">Sedes nuevas</a>' : '<a href="#s-cri">Sedes críticas</a>') + '</nav></header>' +
+    const ctx = esc(S.sede === 'Todas' ? 'Todas las sedes' : S.sede) + '<span class="ctx-sep">/</span>' + esc(nombreMes(S.mes)) + (reales.has(S.mes) ? ' · real' : ' · plan') + '<span class="ctx-sep">/</span><span class="ctx-soft">vs ' + esc(C.ESCENARIOS[S.esc]) + '</span>';
+    const lateral =
+      '<div class="side-group"><div class="side-label">Filtros</div>' +
+      '<div class="sfield"><label for="fsede">Sede</label><select id="fsede">' + optsSede + '</select></div>' +
+      '<div class="sfield"><label for="fmes">Mes</label><select id="fmes">' + optsMes + '</select></div>' +
+      '<div class="sfield"><label for="fesc">Comparar con</label><select id="fesc">' + optsEsc + '</select></div></div>' +
+      navTablero(ds) +
+      '<div class="side-foot"><button class="btn small block solo-movil" id="bcargar2">Cargar informe</button>' +
+      (ds.params ? '<button class="sbtn" id="bparam">Parámetros</button>' : '') + '<button class="sbtn" id="bconf">Configuración</button></div>';
+    $('#app').innerHTML = shell('Tablero financiero', lateral, ctx + '</div><button class="btn small solo-escritorio" id="bcargar">Cargar informe</button><div style="display:none">',
       (!S.db.ok && S.dirty ? '<div class="aviso aviso-top">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador. <a href="#" id="bguardar2">Descargar respaldo (dataset.json)</a></div>' : '') +
-      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secCapacidad() + secPresupuesto(V) + secTendencia() + secSedes() + secGastos(V) + secPlan() + (ds.params ? secDecisiones() + secNuevas() : secCriticas()) + '</main>' + footer();
+      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secPlan() + (ds.params ? secDecisiones() + secNuevas() : secCriticas()) + '</main>' + footer());
+    activarShell(true);
     $('#fsede').onchange = e => { S.sede = e.target.value; render(); };
     $('#fmes').onchange = e => { S.mes = e.target.value; render(); };
     $('#fesc').onchange = e => { S.esc = e.target.value; render(); };
-    $('#bcargar').onclick = modalCargar;
+    $('#bcargar').onclick = modalCargar; $('#bcargar2').onclick = modalCargar;
     $('#bconf').onclick = modalConfig;
     if ($('#bparam')) $('#bparam').onclick = () => { S.psede = S.sede !== 'Todas' ? S.sede : S.psede; renderParams(); window.scrollTo(0, 0); };
     if ($('#bguardar2')) $('#bguardar2').onclick = e => { e.preventDefault(); guardarParams().then(render); };
     pintarChip();
     document.querySelectorAll('.tarea-est').forEach(el => el.onchange = () => { S.ds.params.tareas[+el.dataset.i].estado = el.value; persistir(); });
     document.querySelectorAll('tr[data-sede]').forEach(tr => tr.onclick = () => { S.sede = tr.dataset.sede; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  }
+
+  // ------------------------------------------------------------ navegación lateral (distribución tipo documentación)
+  const NAV = [
+    ['Resumen', [['s-top', 'Resumen del mes']]],
+    ['Resultados', [['s-res', 'Estado de resultados'], ['s-pre', 'Presupuesto vs ejecución'], ['s-gas', 'Gastos'], ['s-ten', 'Tendencia']]],
+    ['Sedes', [['s-sed', 'Resultado por sede'], ['s-cap', 'Capacidad y ocupación']]],
+    ['Plan 2027', [['s-plan', 'Escenarios del plan'], ['s-dec', 'Decisiones 19-nov'], ['s-nue', 'Sedes nuevas e inversión'], ['s-cri', 'Sedes críticas']]]
+  ];
+  function navTablero(ds) {
+    const existe = id => id === 's-top' || (ds.params ? id !== 's-cri' : !['s-cap', 's-pre', 's-dec', 's-nue'].includes(id));
+    let n = 0;
+    return '<nav class="side-nav" id="snav">' + NAV.map(([g, items]) => {
+      const its = items.filter(([id]) => existe(id));
+      return its.length ? '<div class="side-label">' + g + '</div>' + its.map(([id, t]) => '<a href="#' + id + '" data-sec="' + id + '" data-q="' + esc(norm(t)) + '">' + (id === 's-top' ? '' : '<span class="nn">' + String(++n).padStart(2, '0') + '</span>') + esc(t) + '</a>').join('') : '';
+    }).join('') + '<div id="snav-sedes"></div></nav>';
+  }
+  const norm = t => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  function shell(subtitulo, lateral, ctx, contenido) {
+    return '<div class="shell"><aside class="side" id="side">' +
+      '<div class="side-head">' + logo(false) + '<div class="side-client"><b>Eleganza Academia</b><span>' + subtitulo + '</span></div></div>' +
+      '<div class="side-search"><input type="search" id="navq" placeholder="Buscar sección o sede" autocomplete="off"><kbd>/</kbd></div>' + lateral + '</aside>' +
+      '<div class="side-backdrop" id="sback"></div>' +
+      '<div class="main-col"><div class="ctxbar"><button class="burger" id="bburger" aria-label="Abrir menú"><span></span><span></span><span></span></button><div class="ctx">' + ctx + '</div><span class="gchip-wrap">' + chipGuardado() + '</span></div>' + contenido + '</div></div>';
+  }
+  let spy = null;
+  function activarShell(conSpy) {
+    const side = $('#side'), back = $('#sback');
+    const cerrar = () => { side.classList.remove('open'); back.classList.remove('on'); };
+    $('#bburger').onclick = () => { side.classList.add('open'); back.classList.add('on'); };
+    back.onclick = cerrar;
+    side.querySelectorAll('.side-nav a[href^="#"]').forEach(a => a.addEventListener('click', e => {
+      const el = document.getElementById(a.dataset.sec); if (!el) return;
+      e.preventDefault(); cerrar();
+      window.scrollTo({ top: a.dataset.sec === 's-top' ? 0 : el.getBoundingClientRect().top + window.scrollY - 64, behavior: 'smooth' });
+      history.replaceState(null, '', '#' + a.dataset.sec);
+    }));
+    // buscador: filtra secciones y propone sedes (en el tablero cambia el filtro; en parámetros abre la sede)
+    const q = $('#navq'), cajaSedes = $('#snav-sedes');
+    q.oninput = () => {
+      const t = norm(q.value.trim());
+      side.querySelectorAll('.side-nav a[data-q]').forEach(a => a.classList.toggle('oculto', !!t && !a.dataset.q.includes(t)));
+      side.querySelectorAll('.side-nav .side-label').forEach(l => { let x = l.nextElementSibling, vis = false; while (x && x.tagName === 'A') { if (!x.classList.contains('oculto')) vis = true; x = x.nextElementSibling; } l.classList.toggle('oculto', !vis); });
+      if (cajaSedes) {
+        const ss = t ? C.NOMBRES_SEDES.filter(n => norm(n).includes(t)) : [];
+        cajaSedes.innerHTML = ss.length ? '<div class="side-label">Ver sede</div>' + ss.map(n => '<a href="#" class="sede-link" data-sede-nav="' + esc(n) + '">' + esc(n) + '</a>').join('') : '';
+        cajaSedes.querySelectorAll('[data-sede-nav]').forEach(a => a.onclick = e => { e.preventDefault(); S.sede = a.dataset.sedeNav; render(); window.scrollTo(0, 0); });
+      }
+    };
+    q.onkeydown = e => {
+      if (e.key === 'Enter') { const v = [...side.querySelectorAll('.side-nav a')].find(a => !a.classList.contains('oculto') && a.offsetParent); if (v) { e.preventDefault(); v.click(); q.value = ''; q.oninput(); } }
+      if (e.key === 'Escape') { q.value = ''; q.oninput(); q.blur(); }
+    };
+    // sección activa según el scroll
+    if (spy) spy.disconnect();
+    if (conSpy && 'IntersectionObserver' in window) {
+      const links = Object.fromEntries([...side.querySelectorAll('.side-nav a[data-sec]')].map(a => [a.dataset.sec, a]));
+      const marcar = id => Object.entries(links).forEach(([k, a]) => a.classList.toggle('on', k === id));
+      marcar('s-top');
+      spy = new IntersectionObserver(ents => {
+        const vis = ents.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (vis) marcar(vis.target.id);
+      }, { rootMargin: '-72px 0px -65% 0px' });
+      Object.keys(links).forEach(id => { const el = document.getElementById(id); if (el) spy.observe(el); });
+    }
+  }
+  if (!window.__atajoNav) {
+    window.__atajoNav = true;
+    document.addEventListener('keydown', e => {
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if ((e.key === '/' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) && !/INPUT|TEXTAREA|SELECT/.test(tag) && $('#navq')) { e.preventDefault(); $('#navq').focus(); }
+    });
   }
 
   // ------------------------------------------------------------ hero + narrativa
@@ -203,7 +277,7 @@
       txt = 'Aún no se ha cargado el informe a socios de ' + C.keyLabel(k) + '. Para este mes el ' + escN + ' proyecta para ' + esc(sedeTxt()) + ' ingresos de <b>' + fM(P.ing) + '</b>, margen de contribución de <b>' + fP(P.mcP) + '</b> y utilidad de gestión de <b>' + fM(P.uai) + '</b> (' + fP(P.uaiP) + '). ' +
         'El punto de equilibrio previsto es ' + fM(P.pe) + ', con un margen de seguridad de ' + fP(P.ms) + '.';
     }
-    return '<section class="hero"><div class="hero-in"><span class="pill">' + (V.R ? 'Resultados reales' : 'Plan financiero 2027') + '</span>' +
+    return '<section class="hero" id="s-top"><div class="hero-in"><span class="pill">' + (V.R ? 'Resultados reales' : 'Plan financiero 2027') + '</span>' +
       '<h1>' + esc(S.sede === 'Todas' ? 'Eleganza Academia' : S.sede) + '</h1><p class="sub">' + nombreMes(k) + (S.sede === 'Todas' ? ' · consolidado de 24 sedes' : ' · sede') +
       '<span class="badge-mes">' + esc(V.R ? (V.P ? 'Comparación: ' + C.ESCENARIOS[S.esc] : V.Rp ? 'Comparación: ' + C.keyLabel(V.kPrev) : 'Primer mes cargado: sin referencia') : 'Proyección: ' + C.ESCENARIOS[S.esc]) + '</span></p>' +
       '<p class="narr">' + txt + '</p></div></section>';
@@ -610,7 +684,10 @@
     const cursos = '<table class="t mini-t"><tr><th>Curso</th><th>Grupos activos</th><th>Estudiantes</th><th>Programados</th></tr>' + C.CURSOS.map(([c, n]) => { const x = p.cursos[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="s.cursos.' + c + '.grupos" data-t="int" value="' + (x.grupos || 0) + '"></td><td><input data-p="s.cursos.' + c + '.estudiantes" data-t="int" value="' + (x.estudiantes || 0) + '"></td><td><input data-p="s.cursos.' + c + '.programados" data-t="int" value="' + (x.programados || 0) + '"></td></tr>'; }).join('') + '</table>';
     const resumen = C.NOMBRES_SEDES.map(n => { const q = PR.sedes[n], v = A('vigente', n), b = A('base', n), fx = C.LINEAS_FIJAS.reduce((a, [k]) => a + (+q.presupuesto[k] || 0), 0); return '<tr class="click' + (n === s ? ' sel' : '') + '" data-psede="' + esc(n) + '"><td>' + esc(n) + '</td><td>' + q.salones + ' / ' + q.salonesPlan + ' / ' + q.salonesPosibles + '</td><td>' + q.gruposActivos + '</td><td>' + fN(q.estudiantesActivos) + '</td><td>' + fP(q.ocupPlan) + '</td><td>' + (q.kit ? 'Sí' : 'No') + '</td><td>' + fP2(q.incPrecio == null ? G.incPrecio : q.incPrecio) + '</td><td>' + fM(fx) + '</td><td class="' + (b.uai < 0 ? 'neg' : '') + '">' + fM(b.uai) + '</td><td class="' + (v.uai < 0 ? 'neg' : 'pos') + '">' + fM(v.uai) + '</td></tr>'; }).join('');
     const T = A('vigente', 'Todas');
-    $('#app').innerHTML = '<header class="topbar"><div class="topbar-in">' + logo(false) + '<div class="client"><b>Eleganza Academia</b><br>Parámetros del tablero</div><div class="filters"><span class="gchip-wrap">' + chipGuardado() + '</span><button class="btn ghost small" id="pvolver">Volver al tablero</button><button class="btn ghost small" id="pguardar">Descargar respaldo</button></div></div></header>' +
+    const lateralP = '<nav class="side-nav" id="snav"><a href="#" class="volver" id="pvolver2">‹ Volver al tablero</a><div class="side-label">Generales</div><a href="#pgen" data-sec="pgen" data-q="parametros generales">Parámetros generales</a>' +
+      '<div class="side-label">Sedes</div>' + C.NOMBRES_SEDES.map(n => '<a href="#" class="' + (n === s ? 'on' : '') + '" data-psede-nav="' + esc(n) + '" data-q="' + esc(norm(n)) + '">' + esc(n) + '</a>').join('') + '</nav>' +
+      '<div class="side-foot"><button class="sbtn" id="pvolver">Volver al tablero</button><button class="sbtn" id="pguardar">Descargar respaldo</button></div>';
+    $('#app').innerHTML = shell('Parámetros del tablero', lateralP, 'Parámetros<span class="ctx-sep">/</span>' + esc(s), '' +
       '<main>' + (!S.db.ok && S.dirty ? '<div class="aviso">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador: pulse <b>Descargar respaldo</b> y suba el dataset.json a la carpeta data del repositorio.</div>' : '') +
       '<section class="section"><p class="eyebrow">Base de parámetros</p><h2>Capacidad, cursos y presupuesto por sede</h2><div class="divider"></div>' +
       '<p class="lead">Todo el tablero se recalcula con estos valores: capacidad y ocupación, presupuesto vigente, ejecución, sedes nuevas y decisiones. Al pulsar Aplicar, los cambios se guardan solos en la base de datos cifrada y quedan visibles para todos los que entren con la clave. Presupuesto vigente 2027 de la empresa con los parámetros actuales: ' + fM(T.ing) + ' de ingresos y ' + fM(T.uai) + ' de utilidad (' + fP(T.uaiP) + ').</p>' +
@@ -628,7 +705,11 @@
       campo('Tasa de oportunidad (CDT)', 'g.tasaDescuento', G.tasaDescuento, 'pct') + campo('Meses de capital de trabajo', 'g.mesesCapitalTrabajo', G.mesesCapitalTrabajo, 'int') + campo('Ocupación para expandir', 'g.ocupExpansion', G.ocupExpansion, 'pct') + campo('Meses de maduración', 'g.mesesMaduracion', G.mesesMaduracion, 'int') +
       campo('Plazo máximo en pérdida (meses)', 'g.plazoMaxPerdida', G.plazoMaxPerdida, 'int') + campo('Horizonte de evaluación (meses)', 'g.horizonteMeses', G.horizonteMeses, 'int') + campo('Inversión de referencia sede nueva', 'g.inversionNuevaSede', G.inversionNuevaSede, 'pesos') + campo('Corte de datos operativos', 'g.corteOperativo', G.corteOperativo, 'mes') + '</div>' +
       '<div class="row-actions"><button class="btn" id="pgaplicar">Aplicar generales</button></div><div id="pgerr"></div></div></div></div></section>' +
-      '<section class="section"><p class="eyebrow">Resumen</p><h2>Parámetros de las 24 sedes</h2><div class="divider"></div><div class="card" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Salones hoy / 2027 / posibles</th><th>Grupos</th><th>Estudiantes</th><th>Ocupación 2027</th><th>Kit</th><th>Incremento</th><th>Fijos/mes</th><th>Utilidad base</th><th>Utilidad vigente</th></tr>' + resumen + '</table></div></div></section></main>' + footer();
+      '<section class="section"><p class="eyebrow">Resumen</p><h2>Parámetros de las 24 sedes</h2><div class="divider"></div><div class="card" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Salones hoy / 2027 / posibles</th><th>Grupos</th><th>Estudiantes</th><th>Ocupación 2027</th><th>Kit</th><th>Incremento</th><th>Fijos/mes</th><th>Utilidad base</th><th>Utilidad vigente</th></tr>' + resumen + '</table></div></div></section></main>' + footer());
+    activarShell(false);
+    { const act = document.querySelector('[data-psede-nav].on'); if (act) act.scrollIntoView({ block: 'center' }); window.scrollTo(0, 0); }
+    $('#pvolver2').onclick = e => { e.preventDefault(); render(); window.scrollTo(0, 0); };
+    document.querySelectorAll('[data-psede-nav]').forEach(a => a.onclick = e => { e.preventDefault(); S.psede = a.dataset.psedeNav; renderParams(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
     $('#pvolver').onclick = () => { render(); window.scrollTo(0, 0); };
     $('#psel').onchange = e => { S.psede = e.target.value; renderParams(); };
     document.querySelectorAll('tr[data-psede]').forEach(tr => tr.onclick = () => { S.psede = tr.dataset.psede; renderParams(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
