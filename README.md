@@ -141,3 +141,13 @@ Estructura:
 
 ---
 Daniel Financiero · DiCi — Di que sí, con criterio.
+
+## Simulador de escenarios 2027
+
+Vista aparte (botón «Simulador 2027» en el menú lateral, o el enlace `#simulador`). Replica en el navegador el motor de cohortes del Excel del plan (hoja Motor: sede × curso × mes de inicio, con deserción acumulada por mes del curso, pagos cada 28 días, kit, docentes y diplomas) y con las plantillas reproduce el plan base ($151,1M), el escenario sin kit ($930,8M), el acordado del 19-nov ($1.547,2M) y la variante con maquillaje igualado ($1.272,6M).
+
+- Carga: una sola vez desde el Excel `Plan_Financiero_2027_Eleganza_Academia.xlsx` (hojas Motor, Cursos, Sedes, Supuestos y Sedes_Criticas, con valores calculados). Queda dentro del dataset cifrado (`ds.sim.base`, ~80 KB).
+- Escenarios de referencia (solo lectura): plan base, plan ajustado, sin kit y sin aumento, acordado 19-nov y acordado con maquillaje igualado. Los escenarios editables se crean como copia y se guardan solos en la base (`ds.sim.escenarios`).
+- Variables: inscripción y cuota 2027 por curso, descuento, maquillaje igualado; inscritos por grupo y deserción; ocupación objetivo, salones, kit, sin aumento y CAC por sede; reducciones de personal, arriendo, servicios, mantenimiento y otros por sede; incremento salarial, IPC, kits, bonificaciones, impuestos, corporativo, financieros y caja inicial.
+- Salidas: estado de resultados anual y mensual, caja operativa (recaudo 92/5/2), resultado por sede, sensibilidad de la utilidad a cada variable y cálculo de la palanca necesaria para un margen meta.
+- Funciones en `src/core.js`: `simDesdeExcel`, `simPlantilla`, `simular`, `simResolver`.
