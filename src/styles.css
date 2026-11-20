@@ -199,3 +199,9 @@ table.t td:first-child .mbar { margin-left: 0; }
 .pf-check input { width: 18px; height: 18px; accent-color: var(--df-blue); }
 .pf-wide { grid-column: 1 / -1; }
 table.mini-t td { padding: 4px 8px; } table.mini-t input { padding: 5px 8px; text-align: right; max-width: 110px; }
+.gchip-wrap { display: inline-flex; }
+.gchip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--sora); font-size: 11px; font-weight: 600; padding: 6px 12px; border-radius: 100px; background: var(--df-success-bg); color: var(--df-success); white-space: nowrap; }
+.gchip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.gchip.pendiente, .gchip.guardando { background: var(--df-blue-ultra); color: var(--df-blue); }
+.gchip.error { background: var(--df-danger-bg); color: var(--df-danger); cursor: pointer; }
+.gchip.off { background: #FFF6E5; color: #B7791F; }
