@@ -83,6 +83,14 @@ El punto de equilibrio se calcula como (gastos fijos de sede + pauta + corporati
 
 La clasificación de cuentas está en `src/core.js` (`clasificaCuenta`). Si contabilidad crea una cuenta nueva que no encaja, la carga la muestra como "sin clasificar".
 
+## Guardado automático (base de datos)
+
+Los datos viven en una base Redis (Upstash, conectada desde Storage en Vercel) detrás de la función `api/datos.js`. Cada cambio se guarda solo a los pocos segundos y queda visible para todos los que entren con la clave: parámetros, estado de las tareas, informes cargados, meses quitados y cambio de clave. El indicador de la barra superior muestra el estado: Guardado con la hora, Guardando o No se guardó (al tocarlo se reintenta). La base conserva las últimas 10 versiones como historial.
+
+- **Si dos personas editan a la vez:** el segundo guardado detecta que hay una versión más nueva y pregunta si cargarla o guardar encima.
+- **Si la base no está conectada:** la app abre con `data/dataset.json` del repositorio, avisa que los cambios quedan solo en el navegador y permite descargar un respaldo.
+- **Respaldo:** en Configuración o en Parámetros se descarga cuando se quiera una copia cifrada (`dataset.json`).
+
 ## Actualización mensual
 
 1. Abra el link e ingrese la clave.
@@ -91,23 +99,28 @@ La clasificación de cuentas está en `src/core.js` (`clasificaCuenta`). Si cont
    - El mes detectado. Se toma del nombre del archivo o de la hoja; corríjalo si hace falta.
    - Que las 24 sedes estén detectadas.
    - Que el cuadre con la columna total diga **Cuadra**.
-4. Pulse **Incorporar y guardar**. Se descarga un `dataset.json` cifrado.
-5. Súbalo a GitHub en el repositorio `DashboardEleganzaAcademia`: carpeta `data` › **Add file › Upload files**, y luego **Commit changes**. Vercel publica el cambio en uno o dos minutos.
-
-Si carga de nuevo un mes que ya existe, ese mes se reemplaza. En **Configuración** puede quitar un mes, cambiar la clave (también descarga un `dataset.json` nuevo para subir) y ver el historial de cargas.
+4. Pulse **Incorporar y guardar**. Queda guardado en la base. No hay que subir nada a GitHub.
+5. En **Parámetros**, actualice los grupos y estudiantes activos de cada sede con el corte del mes.
 
 ## Seguridad
 
-- `data/dataset.json` está cifrado con AES-GCM de 256 bits. La llave sale de la clave con PBKDF2-SHA256 (600.000 iteraciones), y el contenido se comprime antes de cifrar. El descifrado ocurre solo en el navegador.
-- Los Excel originales nunca se suben: `data-raw/` está en `.gitignore`.
-- Si se olvida la clave, nadie puede recuperar los datos. Hay que regenerarlos con `npm run seed`.
-- Vercel envía el dataset sin caché y con cabeceras que bloquean el embebido de la página.
+- **Cifrado en el navegador:** el dataset se cifra antes de salir del navegador, con AES-GCM de 256 bits. Una sola derivación PBKDF2-SHA256 (600.000 iteraciones) de la clave produce dos cosas: la llave de cifrado y un permiso de escritura.
+- **Lo que guarda el servidor:**
+  - El sobre cifrado.
+  - El SHA-256 del permiso de escritura.
+
+  Nunca recibe la clave ni los datos en claro. Para guardar hay que enviar el permiso correcto: quien no tenga la clave no puede leer ni escribir.
+- **Primer guardado:** se valida contra el permiso del `data/dataset.json` publicado en el repositorio.
+- **Cambio de clave:** reemplaza el permiso en la base y la clave anterior deja de funcionar para todos.
+- **Excel originales:** nunca se suben; `data-raw/` está en `.gitignore`.
+- **Si se olvida la clave:** nadie puede recuperar los datos. Hay que regenerarlos con `npm run seed` y luego guardar desde la app.
 
 ## Despliegue en Vercel
 
 1. En vercel.com entre a **Add New › Project** e importe el repositorio `DashboardEleganzaAcademia`.
-2. La configuración se toma de `vercel.json`: build `npm run build`, salida `dist`. No hay variables de entorno.
-3. Pulse **Deploy**. Cada commit en `main` vuelve a publicar.
+2. La configuración se toma de `vercel.json`: build `npm run build`, salida `dist`, y la función `api/datos.js`.
+3. En el proyecto, entre a **Storage › Create Database › Upstash for Redis** (plan gratuito) y conéctelo al proyecto. Vercel crea solo las variables `KV_REST_API_URL` y `KV_REST_API_TOKEN`, que son las que usa la función.
+4. Vuelva a publicar (**Deployments › Redeploy**) para que la función tome las variables. Cada commit en `main` publica de nuevo; los datos de la base no se tocan.
 
 ## Desarrollo
 

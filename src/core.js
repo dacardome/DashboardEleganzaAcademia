@@ -392,29 +392,46 @@
     return new Uint8Array(await new Response(s).arrayBuffer());
   }
   const ITER = 600000;
-  async function deriveKey(pin, salt, iter) {
-    const base = await subtle().importKey('raw', new TextEncoder().encode(String(pin)), 'PBKDF2', false, ['deriveKey']);
-    return subtle().deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter || ITER }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const hex = buf => Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+  /**
+   * Una sola derivación PBKDF2 de 64 bytes: los primeros 32 son la llave AES (idénticos a derivar 32 bytes,
+   * así que los datasets anteriores siguen abriendo) y los últimos 32 son el permiso de escritura en la base.
+   * El servidor solo guarda el SHA-256 del permiso; nunca ve la clave ni los datos en claro.
+   */
+  async function deriveKeys(pin, salt, iter) {
+    const base = await subtle().importKey('raw', new TextEncoder().encode(String(pin)), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await subtle().deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter || ITER }, base, 512));
+    const key = await subtle().importKey('raw', bits.slice(0, 32), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    const auth = hex(bits.slice(32));
+    return { key, auth, authHash: await sha256hex(auth) };
   }
+  async function sha256hex(txt) { return hex(await subtle().digest('SHA-256', new TextEncoder().encode(txt))); }
+  async function deriveKey(pin, salt, iter) { return (await deriveKeys(pin, salt, iter)).key; }
   function randomBytes(n) { const b = new Uint8Array(n); globalThis.crypto.getRandomValues(b); return b; }
-  async function encryptDataset(ds, key, salt) {
+  async function encryptDataset(ds, key, salt, authHash) {
     let bytes = new TextEncoder().encode(JSON.stringify(ds));
     let gz = false;
     if (typeof CompressionStream !== 'undefined') { bytes = await streamBytes(bytes, new CompressionStream('gzip')); gz = true; }
     const iv = randomBytes(12);
     const ct = await subtle().encrypt({ name: 'AES-GCM', iv }, key, bytes);
-    return { app: 'eleganza-academia-dashboard', v: 1, updatedAt: new Date().toISOString(), kdf: { name: 'PBKDF2', hash: 'SHA-256', iter: ITER, salt: b64e(salt) }, iv: b64e(iv), gz, ct: b64e(ct) };
+    const env = { app: 'eleganza-academia-dashboard', v: 1, updatedAt: new Date().toISOString(), kdf: { name: 'PBKDF2', hash: 'SHA-256', iter: ITER, salt: b64e(salt) }, iv: b64e(iv), gz, ct: b64e(ct) };
+    if (authHash) env.auth = authHash;
+    return env;
   }
-  async function decryptDataset(env, pin) {
-    const salt = b64d(env.kdf.salt);
-    const key = await deriveKey(pin, salt, env.kdf.iter);
+  /** Abre un sobre con una llave ya derivada (misma clave y misma sal). */
+  async function decryptWithKey(env, key) {
     let bytes;
     try { bytes = new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv: b64d(env.iv) }, key, b64d(env.ct))); }
     catch (e) { const err = new Error('Clave incorrecta'); err.code = 'bad_pin'; throw err; }
     if (env.gz) bytes = await streamBytes(bytes, new DecompressionStream('gzip'));
-    return { ds: JSON.parse(new TextDecoder().decode(bytes)), key, salt };
+    return JSON.parse(new TextDecoder().decode(bytes));
   }
-  async function newKey(pin) { const salt = randomBytes(16); const key = await deriveKey(pin, salt); return { key, salt }; }
+  async function decryptDataset(env, pin) {
+    const salt = b64d(env.kdf.salt);
+    const { key, auth, authHash } = await deriveKeys(pin, salt, env.kdf.iter);
+    return { ds: await decryptWithKey(env, key), key, salt, auth, authHash };
+  }
+  async function newKey(pin) { const salt = randomBytes(16); const k = await deriveKeys(pin, salt); return { key: k.key, salt, auth: k.auth, authHash: k.authHash }; }
 
   // ------------------------------------------------------------------ dataset
   function datasetVacio(planData, params) {
@@ -437,7 +454,7 @@
     num, norm, pad2, keyOf, keyParts, keyLabel, addMonths, round,
     clasificaCuenta, clasificaEspecial, periodoDeTexto, encontrarHoja, parseInforme,
     completar, sumar, real, plan, acumular, mesesReales, mesesPlan, porSede,
-    deriveKey, newKey, encryptDataset, decryptDataset, b64e, b64d,
+    deriveKey, deriveKeys, sha256hex, newKey, encryptDataset, decryptDataset, decryptWithKey, b64e, b64d,
     datasetVacio, incorporar,
     CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, presupuestoMes, evaluarInversion, mesesDesde
   };

@@ -4,7 +4,8 @@
   const C = window.EACore;
   const $ = (sel, el) => (el || document).querySelector(sel);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const S = { env: null, ds: null, key: null, salt: null, sede: 'Todas', mes: null, esc: 'vigente', dirty: false, psede: null };
+  const S = { env: null, ds: null, key: null, salt: null, auth: null, authHash: null, sede: 'Todas', mes: null, esc: 'vigente', dirty: false, psede: null,
+    db: { ok: false, motivo: '', version: 0, estado: 'guardado', ultimo: null, timer: null, enCurso: null, otraVez: false } };
   let nsec = 0; const num = () => String(++nsec).padStart(2, '0');
 
   // ------------------------------------------------------------ formato
@@ -31,9 +32,79 @@
   async function cargarEnvelope() {
     const inl = document.getElementById('ea-data');
     if (inl) return JSON.parse(inl.textContent);
+    // 1) base de datos (guardado automático); 2) archivo publicado en el repositorio
+    try {
+      const r = await fetch('api/datos', { cache: 'no-store' });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.envelope) { S.db.ok = true; S.db.version = j.version; S.db.ultimo = j.updatedAt; return j.envelope; }
+      if (r.status === 404) { S.db.ok = true; S.db.version = 0; }
+      else S.db.motivo = j.error === 'sin_base' ? 'La base de datos todavía no está conectada al proyecto en Vercel.' : 'No se pudo leer la base de datos (' + (j.mensaje || r.status) + ').';
+    } catch (e) { S.db.motivo = 'Sin conexión con la base de datos.'; }
     try { const r = await fetch('data/dataset.json', { cache: 'no-store' }); if (r.ok) return await r.json(); } catch (e) { }
     return null;
   }
+
+  // ------------------------------------------------------------ guardado automático en la base de datos
+  function chipGuardado() {
+    const d = S.db;
+    if (!d.ok) return '<span class="gchip off" title="' + esc(d.motivo) + '">Sin base de datos</span>';
+    const t = d.estado === 'guardando' ? 'Guardando…' : d.estado === 'pendiente' ? 'Cambios por guardar' : d.estado === 'error' ? 'No se guardó · reintentar' :
+      'Guardado' + (d.ultimo ? ' ' + new Date(d.ultimo).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '');
+    return '<span class="gchip ' + d.estado + '" id="gchipbtn" title="' + esc(d.msg || 'Los cambios se guardan solos en la base de datos cifrada') + '">' + t + '</span>';
+  }
+  function pintarChip() { document.querySelectorAll('.gchip-wrap').forEach(el => { el.innerHTML = chipGuardado(); const b = el.querySelector('#gchipbtn'); if (b && S.db.estado === 'error') b.onclick = () => guardarAhora(); }); }
+  /** Marca cambios y los guarda solos (con una pausa corta para agrupar ediciones seguidas). */
+  function persistir(inmediato) {
+    S.dirty = true;
+    if (!S.db.ok) { pintarChip(); return; }
+    S.db.estado = 'pendiente'; pintarChip();
+    clearTimeout(S.db.timer);
+    S.db.timer = setTimeout(guardarAhora, inmediato ? 0 : 900);
+  }
+  async function guardarAhora(cambioClave) {
+    if (!S.db.ok) return false;
+    if (S.db.enCurso) { S.db.otraVez = true; return S.db.enCurso; }
+    clearTimeout(S.db.timer);
+    S.db.estado = 'guardando'; pintarChip();
+    S.db.enCurso = (async () => {
+      try {
+        const nueva = cambioClave || null;
+        const env = await C.encryptDataset(S.ds, nueva ? nueva.key : S.key, nueva ? nueva.salt : S.salt, nueva ? nueva.authHash : S.authHash);
+        const r = await fetch('api/datos', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.auth }, body: JSON.stringify({ envelope: env, baseVersion: S.db.version }) });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          S.db.version = j.version; S.db.ultimo = j.updatedAt; S.db.estado = 'guardado'; S.db.msg = ''; S.env = env; S.dirty = false;
+          if (nueva) { S.key = nueva.key; S.salt = nueva.salt; S.auth = nueva.auth; S.authHash = nueva.authHash; }
+          return true;
+        }
+        S.db.estado = 'error';
+        if (r.status === 409) { S.db.msg = 'Otra persona guardó cambios'; conflicto(j.version); }
+        else if (r.status === 401) { S.db.msg = 'La clave con la que entró no tiene permiso de escritura en la base.'; toast(S.db.msg, 7000); }
+        else { S.db.msg = 'Error al guardar: ' + (j.mensaje || j.error || r.status); toast(S.db.msg + '. Toque el indicador para reintentar.', 7000); }
+        return false;
+      } catch (e) { S.db.estado = 'error'; S.db.msg = 'Sin conexión: ' + e.message; toast('No se pudo guardar (sin conexión). Toque el indicador para reintentar.', 7000); return false; }
+      finally {
+        S.db.enCurso = null; pintarChip();
+        if (S.db.otraVez) { S.db.otraVez = false; if (S.db.estado !== 'error') persistir(true); }
+      }
+    })();
+    return S.db.enCurso;
+  }
+  function conflicto(versionServidor) {
+    const m = modal('<h3>Otra persona guardó cambios</h3><p class="muted">Mientras usted trabajaba, alguien más guardó una versión nueva del tablero (versión ' + versionServidor + '). Elija qué hacer con sus cambios.</p>' +
+      '<div class="row-actions"><button class="btn ghost" id="crec">Cargar la versión guardada</button><button class="btn" id="cmio">Guardar mis cambios encima</button></div>');
+    $('#cmio', m).onclick = () => { m.remove(); S.db.version = versionServidor; guardarAhora(); };
+    $('#crec', m).onclick = async () => {
+      m.remove();
+      try {
+        const r = await fetch('api/datos', { cache: 'no-store' }); const j = await r.json();
+        S.ds = await C.decryptWithKey(j.envelope, S.key); S.env = j.envelope; S.db.version = j.version; S.db.ultimo = j.updatedAt; S.db.estado = 'guardado'; S.dirty = false;
+        if (S.ds.params) C.recalcular(S.ds); render(); toast('Se cargó la versión guardada.');
+      } catch (e) { toast('La clave cambió en la otra versión: vuelva a entrar.', 6000); S.ds = null; renderLogin(); }
+    };
+  }
+  window.addEventListener('beforeunload', e => { if (S.ds && (S.db.estado === 'pendiente' || S.db.estado === 'guardando' || (!S.db.ok && S.dirty))) { e.preventDefault(); e.returnValue = ''; } });
+  function descargarRespaldo() { const env = S.env; return C.encryptDataset(S.ds, S.key, S.salt, S.authHash).then(guardar).then(() => { if (!S.db.ok) S.dirty = false; S.env = S.env || env; }); }
   async function boot() {
     S.env = await cargarEnvelope();
     renderLogin();
@@ -51,7 +122,7 @@
       $('#lerr').textContent = 'Abriendo…';
       try {
         const r = await C.decryptDataset(S.env, pin);
-        S.ds = r.ds; S.key = r.key; S.salt = C.b64d(S.env.kdf.salt);
+        S.ds = r.ds; S.key = r.key; S.salt = C.b64d(S.env.kdf.salt); S.auth = r.auth; S.authHash = r.authHash;
         if (!S.ds.params) S.esc = 'base'; else C.recalcular(S.ds);
         const reales = C.mesesReales(S.ds);
         S.mes = reales.length ? reales[reales.length - 1] : C.mesesPlan(S.ds)[0];
@@ -89,9 +160,9 @@
       '<div class="field"><label for="fsede">Sede</label><select id="fsede">' + optsSede + '</select></div>' +
       '<div class="field"><label for="fmes">Mes</label><select id="fmes">' + optsMes + '</select></div>' +
       '<div class="field"><label for="fesc">Comparar con</label><select id="fesc">' + optsEsc + '</select></div>' +
-      '<button class="btn small" id="bcargar">Cargar informe</button>' + (ds.params ? '<button class="btn ghost small" id="bparam">Parámetros</button>' : '') + '<button class="btn ghost small" id="bconf">Configuración</button></div></div>' +
+      '<span class="gchip-wrap">' + chipGuardado() + '</span><button class="btn small" id="bcargar">Cargar informe</button>' + (ds.params ? '<button class="btn ghost small" id="bparam">Parámetros</button>' : '') + '<button class="btn ghost small" id="bconf">Configuración</button></div></div>' +
       '<nav class="navlinks"><a href="#s-res">Resultados</a>' + (ds.params ? '<a href="#s-cap">Capacidad</a><a href="#s-pre">Presupuesto vs ejecución</a>' : '') + '<a href="#s-ten">Tendencia</a><a href="#s-sed">Sedes</a><a href="#s-gas">Gastos</a><a href="#s-plan">Plan 2027</a>' + (ds.params ? '<a href="#s-dec">Decisiones 19-nov</a><a href="#s-nue">Sedes nuevas</a>' : '<a href="#s-cri">Sedes críticas</a>') + '</nav></header>' +
-      (S.dirty ? '<div class="aviso aviso-top">Hay cambios de parámetros sin guardar en GitHub. <a href="#" id="bguardar2">Guardar y descargar dataset.json</a></div>' : '') +
+      (!S.db.ok && S.dirty ? '<div class="aviso aviso-top">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador. <a href="#" id="bguardar2">Descargar respaldo (dataset.json)</a></div>' : '') +
       hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secCapacidad() + secPresupuesto(V) + secTendencia() + secSedes() + secGastos(V) + secPlan() + (ds.params ? secDecisiones() + secNuevas() : secCriticas()) + '</main>' + footer();
     $('#fsede').onchange = e => { S.sede = e.target.value; render(); };
     $('#fmes').onchange = e => { S.mes = e.target.value; render(); };
@@ -100,7 +171,8 @@
     $('#bconf').onclick = modalConfig;
     if ($('#bparam')) $('#bparam').onclick = () => { S.psede = S.sede !== 'Todas' ? S.sede : S.psede; renderParams(); window.scrollTo(0, 0); };
     if ($('#bguardar2')) $('#bguardar2').onclick = e => { e.preventDefault(); guardarParams().then(render); };
-    document.querySelectorAll('.tarea-est').forEach(el => el.onchange = () => { S.ds.params.tareas[+el.dataset.i].estado = el.value; S.dirty = true; toast('Estado actualizado. Guarde los parámetros para publicarlo.'); });
+    pintarChip();
+    document.querySelectorAll('.tarea-est').forEach(el => el.onchange = () => { S.ds.params.tareas[+el.dataset.i].estado = el.value; persistir(); });
     document.querySelectorAll('tr[data-sede]').forEach(tr => tr.onclick = () => { S.sede = tr.dataset.sede; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
   }
 
@@ -538,10 +610,10 @@
     const cursos = '<table class="t mini-t"><tr><th>Curso</th><th>Grupos activos</th><th>Estudiantes</th><th>Programados</th></tr>' + C.CURSOS.map(([c, n]) => { const x = p.cursos[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="s.cursos.' + c + '.grupos" data-t="int" value="' + (x.grupos || 0) + '"></td><td><input data-p="s.cursos.' + c + '.estudiantes" data-t="int" value="' + (x.estudiantes || 0) + '"></td><td><input data-p="s.cursos.' + c + '.programados" data-t="int" value="' + (x.programados || 0) + '"></td></tr>'; }).join('') + '</table>';
     const resumen = C.NOMBRES_SEDES.map(n => { const q = PR.sedes[n], v = A('vigente', n), b = A('base', n), fx = C.LINEAS_FIJAS.reduce((a, [k]) => a + (+q.presupuesto[k] || 0), 0); return '<tr class="click' + (n === s ? ' sel' : '') + '" data-psede="' + esc(n) + '"><td>' + esc(n) + '</td><td>' + q.salones + ' / ' + q.salonesPlan + ' / ' + q.salonesPosibles + '</td><td>' + q.gruposActivos + '</td><td>' + fN(q.estudiantesActivos) + '</td><td>' + fP(q.ocupPlan) + '</td><td>' + (q.kit ? 'Sí' : 'No') + '</td><td>' + fP2(q.incPrecio == null ? G.incPrecio : q.incPrecio) + '</td><td>' + fM(fx) + '</td><td class="' + (b.uai < 0 ? 'neg' : '') + '">' + fM(b.uai) + '</td><td class="' + (v.uai < 0 ? 'neg' : 'pos') + '">' + fM(v.uai) + '</td></tr>'; }).join('');
     const T = A('vigente', 'Todas');
-    $('#app').innerHTML = '<header class="topbar"><div class="topbar-in">' + logo(false) + '<div class="client"><b>Eleganza Academia</b><br>Parámetros del tablero</div><div class="filters"><button class="btn ghost small" id="pvolver">Volver al tablero</button><button class="btn small" id="pguardar">Guardar y descargar dataset.json</button></div></div></header>' +
-      '<main>' + (S.dirty ? '<div class="aviso">Hay cambios aplicados en esta sesión que todavía no están en GitHub. Pulse <b>Guardar y descargar</b> y suba el dataset.json a la carpeta data del repositorio.</div>' : '') +
+    $('#app').innerHTML = '<header class="topbar"><div class="topbar-in">' + logo(false) + '<div class="client"><b>Eleganza Academia</b><br>Parámetros del tablero</div><div class="filters"><span class="gchip-wrap">' + chipGuardado() + '</span><button class="btn ghost small" id="pvolver">Volver al tablero</button><button class="btn ghost small" id="pguardar">Descargar respaldo</button></div></div></header>' +
+      '<main>' + (!S.db.ok && S.dirty ? '<div class="aviso">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador: pulse <b>Descargar respaldo</b> y suba el dataset.json a la carpeta data del repositorio.</div>' : '') +
       '<section class="section"><p class="eyebrow">Base de parámetros</p><h2>Capacidad, cursos y presupuesto por sede</h2><div class="divider"></div>' +
-      '<p class="lead">Todo el tablero se recalcula con estos valores: capacidad y ocupación, presupuesto vigente, ejecución, sedes nuevas y decisiones. Los cambios se aplican de inmediato en esta sesión; para que todos los vean, guarde y suba el dataset.json a GitHub. Presupuesto vigente 2027 de la empresa con los parámetros actuales: ' + fM(T.ing) + ' de ingresos y ' + fM(T.uai) + ' de utilidad (' + fP(T.uaiP) + ').</p>' +
+      '<p class="lead">Todo el tablero se recalcula con estos valores: capacidad y ocupación, presupuesto vigente, ejecución, sedes nuevas y decisiones. Al pulsar Aplicar, los cambios se guardan solos en la base de datos cifrada y quedan visibles para todos los que entren con la clave. Presupuesto vigente 2027 de la empresa con los parámetros actuales: ' + fM(T.ing) + ' de ingresos y ' + fM(T.uai) + ' de utilidad (' + fP(T.uaiP) + ').</p>' +
       '<div class="grid g-side"><div class="card" id="pform"><div class="pf-head"><div class="field"><label>Sede</label><select id="psel">' + opt + '</select></div>' +
       '<div class="pf-kpis"><span>Utilidad 2027 base <b class="' + (vb.uai < 0 ? 'down' : '') + '">' + fM(vb.uai) + '</b></span><span>Vigente <b class="' + (vv.uai < 0 ? 'down' : 'up') + '">' + fM(vv.uai) + '</b></span><span>Ocupación hoy <b>' + fP(cap.ocupFranjas) + '</b></span><span>Factor de volumen <b>' + nf1.format(S.ds.plan.plan.vigente[s].f) + 'x</b></span></div></div>' +
       '<h4>Capacidad actual</h4><div class="pf-grid">' + campo('Salones habilitados', 's.salones', p.salones, 'int') + campo('Salones posibles', 's.salonesPosibles', p.salonesPosibles, 'int', 'Espacio disponible para habilitar') + campo('Grupos activos', 's.gruposActivos', p.gruposActivos, 'int') + campo('Estudiantes activos', 's.estudiantesActivos', p.estudiantesActivos, 'int') + campo('Deserción histórica', 's.desercion', p.desercion, 'pct') + '</div>' +
@@ -563,21 +635,21 @@
     const aplicar = (root, errEl) => {
       const errs = leerCampos(root);
       if (errs.length) { $(errEl).innerHTML = '<p class="down">' + errs.map(esc).join('<br>') + '</p>'; return; }
-      C.recalcular(S.ds); S.dirty = true; renderParams(); toast('Cambios aplicados. Guarde y suba el dataset.json para publicarlos.', 5000);
+      C.recalcular(S.ds); persistir(true); renderParams(); toast(S.db.ok ? 'Cambios aplicados y guardados.' : 'Cambios aplicados solo en este navegador: falta conectar la base de datos.', 4000);
     };
     $('#paplicar').onclick = () => aplicar($('#pform'), '#perr');
     $('#pgaplicar').onclick = () => aplicar($('#pgen'), '#pgerr');
     $('#preset').onclick = () => {
       const ini = S.ds.paramsInicial && S.ds.paramsInicial.sedes[s];
       if (!ini) { toast('No hay valores iniciales guardados para esta sede.'); return; }
-      S.ds.params.sedes[s] = JSON.parse(JSON.stringify(ini)); C.recalcular(S.ds); S.dirty = true; renderParams(); toast('Se restablecieron los valores iniciales de ' + s + '.');
+      S.ds.params.sedes[s] = JSON.parse(JSON.stringify(ini)); C.recalcular(S.ds); persistir(true); renderParams(); toast('Se restablecieron los valores iniciales de ' + s + '.');
     };
     $('#pguardar').onclick = guardarParams;
+    pintarChip();
   }
   async function guardarParams() {
-    await guardar(await C.encryptDataset(S.ds, S.key, S.salt));
-    S.dirty = false;
-    const m = modal('<h3>Parámetros guardados</h3><p class="muted">Se descargó <b>dataset.json</b> cifrado con los parámetros actuales. Para que todos lo vean en el link:</p>' + pasosPublicar + '<div class="row-actions"><button class="btn" id="mok">Entendido</button></div>');
+    await descargarRespaldo();
+    const m = modal('<h3>Respaldo descargado</h3><p class="muted">Se descargó <b>dataset.json</b> cifrado con todos los datos y parámetros actuales. ' + (S.db.ok ? 'No hace falta subirlo: los cambios ya se guardan solos en la base de datos. Consérvelo como copia de seguridad.' : 'Como la base de datos no está conectada, para que todos lo vean:</p>' + pasosPublicar + '<p>') + '</p><div class="row-actions"><button class="btn" id="mok">Entendido</button></div>');
     $('#mok', m).onclick = () => m.remove();
     if ($('.aviso')) $('.aviso').remove();
   }
@@ -603,7 +675,7 @@
   const pasosPublicar = '<ol class="steps-list"><li>En GitHub abra el repositorio <b>DashboardEleganzaAcademia</b> › carpeta <b>data</b>.</li><li><b>Add file › Upload files</b> y suba el <b>dataset.json</b> que se acaba de descargar (reemplaza el anterior).</li><li>Pulse <b>Commit changes</b>. Vercel publica solo en uno o dos minutos.</li></ol>';
 
   function modalCargar() {
-    const m = modal('<h3>Cargar informe a socios</h3><p class="muted">Arrastre el Excel del informe consolidado por sedes tal como lo envía contabilidad. El mes se toma del nombre del archivo o de la hoja; revíselo antes de guardar. Si el mes ya existe, se reemplaza.</p>' +
+    const m = modal('<h3>Cargar informe a socios</h3><p class="muted">Arrastre el Excel del informe consolidado por sedes tal como lo envía contabilidad. El mes se toma del nombre del archivo o de la hoja; revíselo antes de guardar. Si el mes ya existe, se reemplaza. Al incorporarlo queda guardado en la base de datos.</p>' +
       '<label class="drop" id="drop">Arrastre aquí el archivo .xlsx o haga clic para buscarlo<input type="file" id="file" accept=".xlsx,.xls,.xlsm" hidden></label><div id="prev"></div>' +
       '<div class="row-actions"><button class="btn ghost" id="mx">Cerrar</button></div>');
     $('#mx', m).onclick = () => m.remove();
@@ -632,10 +704,10 @@
         $('#inc', m).onclick = async () => {
           const k = C.keyOf(+$('#py', m).value, +$('#pm', m).value);
           C.incorporar(S.ds, p, k, file.name);
-          const env = await C.encryptDataset(S.ds, S.key, S.salt);
-          await guardar(env);
+          if (S.db.ok) { S.dirty = true; await guardarAhora(); } else await descargarRespaldo();
           S.mes = k;
-          prev.innerHTML = '<p class="up">Se incorporó ' + esc(nombreMes(k)) + ' y se descargó <b>dataset.json</b> cifrado.</p><p>Para que todos lo vean en el link:</p>' + pasosPublicar;
+          prev.innerHTML = S.db.ok ? (S.db.estado === 'guardado' ? '<p class="up">Se incorporó ' + esc(nombreMes(k)) + ' y quedó guardado en la base de datos. Ya lo ven todos los que entren con la clave.</p>' : '<p class="down">Se incorporó ' + esc(nombreMes(k)) + ' pero no se pudo guardar: ' + esc(S.db.msg || '') + '</p>')
+            : '<p class="up">Se incorporó ' + esc(nombreMes(k)) + ' y se descargó <b>dataset.json</b> cifrado.</p><p>Para que todos lo vean en el link:</p>' + pasosPublicar;
           render();
         };
       } catch (e) { prev.innerHTML = '<p class="down">' + esc(e.message) + '</p>'; }
@@ -645,29 +717,38 @@
   function modalConfig() {
     const cargas = (S.ds.cargas || []).slice(0, 12);
     const m = modal('<h3>Configuración</h3>' +
-      '<h4 style="font-family:var(--sora);margin:18px 0 6px">Cambiar la clave de acceso</h4><p class="muted">Mínimo 10 caracteres. Al cambiarla se descarga un dataset.json nuevo, que debe subirse a GitHub; la clave anterior deja de funcionar. Si se olvida, no hay forma de recuperarla.</p>' +
+      '<h4 style="font-family:var(--sora);margin:18px 0 6px">Cambiar la clave de acceso</h4><p class="muted">Mínimo 10 caracteres. La clave nueva queda guardada de inmediato y la anterior deja de funcionar para todos. Si se olvida, no hay forma de recuperar los datos.</p>' +
       '<div style="display:grid;gap:8px;max-width:360px"><input type="password" id="c1" placeholder="Nueva clave" class="field" style="padding:10px;border:1px solid #E4ECF7;border-radius:8px"><input type="password" id="c2" placeholder="Repita la nueva clave" style="padding:10px;border:1px solid #E4ECF7;border-radius:8px"><button class="btn" id="cc">Cambiar clave</button></div><div id="cmsg"></div>' +
       '<h4 style="font-family:var(--sora);margin:24px 0 6px">Meses cargados</h4>' +
       '<table class="t"><tr><th>Mes</th><th>Archivo</th><th>Cargado</th><th></th></tr>' + C.mesesReales(S.ds).map(k => '<tr><td>' + nombreMes(k) + '</td><td style="text-align:left">' + esc(S.ds.reales[k].archivo) + '</td><td>' + esc((S.ds.reales[k].cargado || '').slice(0, 10)) + '</td><td><button class="btn ghost small" data-del="' + k + '">Quitar</button></td></tr>').join('') + '</table>' +
       '<h4 style="font-family:var(--sora);margin:24px 0 6px">Últimas cargas</h4><p class="muted" style="font-size:13px">' + (cargas.map(c => esc(c.fecha.slice(0, 10)) + ' · ' + esc(nombreMes(c.periodo)) + ' · ' + esc(c.archivo)).join('<br>') || 'Sin cargas') + '</p>' +
-      '<div class="row-actions"><button class="btn ghost" id="mx">Cerrar</button><button class="btn ghost" id="salir">Salir</button></div>');
+      '<h4 style="font-family:var(--sora);margin:24px 0 6px">Base de datos</h4><p class="muted" style="font-size:13px">' + (S.db.ok ? 'Conectada. Versión ' + S.db.version + (S.db.ultimo ? ', guardada el ' + esc(new Date(S.db.ultimo).toLocaleString('es-CO')) : '') + '. Se conservan las últimas 10 versiones como historial.' : esc(S.db.motivo)) + '</p>' +
+      '<div class="row-actions"><button class="btn ghost" id="mresp">Descargar respaldo</button><button class="btn ghost" id="mx">Cerrar</button><button class="btn ghost" id="salir">Salir</button></div>');
+    $('#mresp', m).onclick = () => descargarRespaldo().then(() => toast('Respaldo descargado.'));
     $('#mx', m).onclick = () => m.remove();
-    $('#salir', m).onclick = () => { S.ds = null; S.key = null; m.remove(); renderLogin(); };
+    $('#salir', m).onclick = async () => { if (S.db.estado === 'pendiente' || S.db.estado === 'guardando') await guardarAhora(); S.ds = null; S.key = null; S.auth = null; m.remove(); renderLogin(); };
     $('#cc', m).onclick = async () => {
       const a = $('#c1', m).value, b = $('#c2', m).value;
       if (a.length < 10) { $('#cmsg', m).innerHTML = '<p class="down">La clave debe tener al menos 10 caracteres.</p>'; return; }
       if (a !== b) { $('#cmsg', m).innerHTML = '<p class="down">Las claves no coinciden.</p>'; return; }
-      const nk = await C.newKey(a); S.key = nk.key; S.salt = nk.salt;
-      await guardar(await C.encryptDataset(S.ds, S.key, S.salt));
-      $('#cmsg', m).innerHTML = '<p class="up">Clave cambiada. Se descargó dataset.json con la nueva clave.</p>' + pasosPublicar;
+      const nk = await C.newKey(a);
+      if (S.db.ok) {
+        $('#cmsg', m).innerHTML = '<p class="muted">Guardando…</p>';
+        const ok = await guardarAhora(nk);
+        $('#cmsg', m).innerHTML = ok ? '<p class="up">Clave cambiada y guardada. Desde ahora se entra con la clave nueva.</p>' : '<p class="down">No se cambió la clave: ' + esc(S.db.msg || '') + '</p>';
+      } else {
+        S.key = nk.key; S.salt = nk.salt; S.auth = nk.auth; S.authHash = nk.authHash;
+        await descargarRespaldo();
+        $('#cmsg', m).innerHTML = '<p class="up">Clave cambiada. Se descargó dataset.json con la nueva clave.</p>' + pasosPublicar;
+      }
     };
     m.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       const k = b.dataset.del;
-      if (!window.confirm('¿Quitar ' + nombreMes(k) + ' del tablero? Se descargará el dataset.json actualizado.')) return;
+      if (!window.confirm('¿Quitar ' + nombreMes(k) + ' del tablero? El cambio se guarda para todos.')) return;
       delete S.ds.reales[k];
-      await guardar(await C.encryptDataset(S.ds, S.key, S.salt));
       const r = C.mesesReales(S.ds); S.mes = r.length ? r[r.length - 1] : C.mesesPlan(S.ds)[0];
-      m.remove(); render(); toast('Mes quitado. Suba el dataset.json descargado a GitHub para publicarlo.', 6000);
+      if (S.db.ok) { S.dirty = true; await guardarAhora(); } else await descargarRespaldo();
+      m.remove(); render(); toast(S.db.ok ? 'Mes quitado y guardado.' : 'Mes quitado. Suba el dataset.json descargado a GitHub para publicarlo.', 6000);
     });
   }
 

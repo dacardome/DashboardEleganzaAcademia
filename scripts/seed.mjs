@@ -32,8 +32,8 @@ for (const f of fs.readdirSync(RAW).filter(f => /\.xlsx?$/i.test(f)).sort()) {
   C.incorporar(ds, parsed, k, f);
   console.log(f, '->', k, 'hoja', parsed.hoja, 'sedes', parsed.sedesDetectadas, 'ingresos', parsed.control.ingresosSedes, 'cuadra', parsed.control.cuadra);
 }
-const { key, salt } = await C.newKey(clave);
-const env = await C.encryptDataset(ds, key, salt);
+const { key, salt, authHash } = await C.newKey(clave);
+const env = await C.encryptDataset(ds, key, salt, authHash);
 fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
 fs.writeFileSync(path.join(ROOT, 'data/dataset.json'), JSON.stringify(env));
 console.log('data/dataset.json', Math.round(JSON.stringify(env).length / 1024) + ' KB', 'meses reales:', Object.keys(ds.reales));
