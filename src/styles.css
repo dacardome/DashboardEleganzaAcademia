@@ -261,3 +261,8 @@ table.mini-t td { padding: 4px 8px; } table.mini-t input { padding: 5px 8px; tex
 .side-search input:not(:placeholder-shown) + kbd { display: none; }
 .solo-movil { display: none; }
 @media (max-width: 1024px) { .solo-movil { display: inline-flex; } .solo-escritorio { display: none; } }
+.duo { height: 4px; background: var(--df-bg); border-radius: 2px; margin-top: 4px; position: relative; max-width: 180px; }
+.duo span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; }
+.duo .dg { background: var(--df-ink); } .duo .di { background: var(--df-blue); }
+.cel { display: inline-block; min-width: 44px; padding: 3px 8px; border-radius: 4px; text-align: right; }
+.cursos-t td:first-child { min-width: 170px; max-width: 220px; }

@@ -164,7 +164,7 @@
       (ds.params ? '<button class="sbtn" id="bparam">Parámetros</button>' : '') + '<button class="sbtn" id="bconf">Configuración</button></div>';
     $('#app').innerHTML = shell('Tablero financiero', lateral, ctx + '</div><button class="btn small solo-escritorio" id="bcargar">Cargar informe</button><div style="display:none">',
       (!S.db.ok && S.dirty ? '<div class="aviso aviso-top">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador. <a href="#" id="bguardar2">Descargar respaldo (dataset.json)</a></div>' : '') +
-      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secPlan() + (ds.params ? secDecisiones() + secNuevas() : secCriticas()) + '</main>' + footer());
+      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secCursos() + secPlan() + (ds.params ? '' : secCriticas()) + '</main>' + footer());
     activarShell(true);
     $('#fsede').onchange = e => { S.sede = e.target.value; render(); };
     $('#fmes').onchange = e => { S.mes = e.target.value; render(); };
@@ -182,11 +182,11 @@
   const NAV = [
     ['Resumen', [['s-top', 'Resumen del mes']]],
     ['Resultados', [['s-res', 'Estado de resultados'], ['s-pre', 'Presupuesto vs ejecución'], ['s-gas', 'Gastos'], ['s-ten', 'Tendencia']]],
-    ['Sedes', [['s-sed', 'Resultado por sede'], ['s-cap', 'Capacidad y ocupación']]],
-    ['Plan 2027', [['s-plan', 'Escenarios del plan'], ['s-dec', 'Decisiones 19-nov'], ['s-nue', 'Sedes nuevas e inversión'], ['s-cri', 'Sedes críticas']]]
+    ['Sedes y cursos', [['s-sed', 'Resultado por sede'], ['s-cap', 'Capacidad y ocupación'], ['s-cur', 'Detalle por curso']]],
+    ['Plan 2027', [['s-plan', 'Escenarios del plan'], ['s-cri', 'Sedes críticas']]]
   ];
   function navTablero(ds) {
-    const existe = id => id === 's-top' || (ds.params ? id !== 's-cri' : !['s-cap', 's-pre', 's-dec', 's-nue'].includes(id));
+    const existe = id => id === 's-top' || (ds.params ? id !== 's-cri' : !['s-cap', 's-pre', 's-cur'].includes(id));
     let n = 0;
     return '<nav class="side-nav" id="snav">' + NAV.map(([g, items]) => {
       const its = items.filter(([id]) => existe(id));
@@ -489,7 +489,7 @@
       '<tr><td>Estudiantes activos</td>' + Ms.map(x => '<td>' + fN(x.act) + '</td>').join('') + '<td><b>' + fN(Ms.reduce((a, x) => a + x.act, 0) / 12) + '</b></td></tr>' +
       '<tr><td>Grupos activos</td>' + Ms.map(x => '<td>' + fN(x.ga) + '</td>').join('') + '<td><b>' + fN(Ms.reduce((a, x) => a + x.ga, 0) / 12) + '</b></td></tr></table>';
     return '<section class="section" id="s-plan"><p class="eyebrow">' + num() + ' — Plan financiero ' + PL.anio + '</p><h2>Escenarios para ' + esc(S.sede === 'Todas' ? 'la empresa' : S.sede) + '</h2><div class="divider"></div>' +
-      '<p class="lead">' + (PL.plan.vigente ? 'Presupuesto vigente: plan base con los parámetros actuales y las decisiones del 19 de noviembre (incremento de ' + fP2(S.ds.params.generales.incPrecio) + ' en cuotas, Barrancabermeja, Sincelejo, Venecia y Zipaquirá). ' : '') + 'Plan base: ocupación histórica de cada sede. Plan ajustado: ocupación necesaria en las sedes críticas para llegar al margen meta de ' + fP2(PL.meta) + '. Sin kit y sin aumento: el plan base sin el 5% de aumento de precio y sin el costo del kit. Los grupos a abrir son números enteros.</p>' +
+      '<p class="lead">' + (PL.plan.vigente ? 'Presupuesto vigente: plan base recalculado con los parámetros de cada sede (incremento de ' + fP2(S.ds.params.generales.incPrecio) + ' en cuotas y los ajustes de salones, ocupación, kit y gastos cargados en Parámetros). ' : '') + 'Plan base: ocupación histórica de cada sede. Plan ajustado: ocupación necesaria en las sedes críticas para llegar al margen meta de ' + fP2(PL.meta) + '. Sin kit y sin aumento: el plan base sin el 5% de aumento de precio y sin el costo del kit. Los grupos a abrir son números enteros.</p>' +
       '<div class="grid g4">' + cards + '</div><div class="card" style="margin-top:20px;padding:0"><div class="tw">' + tabla + '</div></div></section>';
   }
 
@@ -542,6 +542,47 @@
       '<div class="grid g2"><div class="card"><h3>Cursos asignados · ' + esc(S.sede === 'Todas' ? 'empresa' : S.sede) + '</h3><div class="tw"><table class="t"><tr><th>Curso</th><th>Grupos</th><th>Estudiantes</th><th>Est./grupo</th><th>Programados dic-ene</th></tr>' + cursos +
       '<tr class="tot"><td>Total</td><td>' + fN(T.gruposCursos) + '</td><td>' + fN(T.estCursos) + '</td><td>' + (T.gruposCursos ? nf1.format(T.estCursos / T.gruposCursos) : '—') + '</td><td>' + fN(T.programados) + '</td></tr></table></div>' +
       '<p class="note">Grupos activos y ocupación: grupos simultáneos de octubre de 2026. Estudiantes activos: estado Activo en Power BI (corte ' + esc(G.corteOperativo) + '). Cursos: grupos iniciados entre julio y noviembre. Grupos habilitables: franjas hasta el tope de ' + fP(G.topeOcupacion) + ' menos grupos activos. Todo se edita en Parámetros.</p></div>' + salonesCard() + '</div></section>';
+  }
+
+  // ------------------------------------------------------------ detalle por curso
+  function secCursos() {
+    if (!S.ds.params || !S.ds.params.cursosInfo) return '';
+    const D = C.cursosDetalle(S.ds, S.sede, S.mes), T = D.T, F = D.filas.filter(x => x.grupos || x.insc);
+    if (!F.length) return '';
+    const porRend = F.filter(x => x.grupos >= 2).slice().sort((a, b) => a.rendimiento - b.rendimiento);
+    const top = F.slice().sort((a, b) => b.pesoGrupos - a.pesoGrupos)[0], baja = porRend[0], alta = porRend[porRend.length - 1];
+    const llen = F.filter(x => x.grupos >= 2).sort((a, b) => a.llenado - b.llenado)[0];
+    let txt = esc(S.sede === 'Todas' ? 'En la empresa' : 'En ' + S.sede) + ' hay ' + fN(T.grupos) + ' grupos activos con ' + fN(T.est) + ' estudiantes, un llenado de ' + fP(T.llenado) + ' de los cupos de esos grupos. ' +
+      esc(top.nombre) + ' es el curso que más espacio usa: ' + fP(top.pesoGrupos) + ' de los grupos y ' + fP(top.pctFranjas) + ' de las franjas, y aporta ' + fP(top.pesoIng) + ' del ingreso estimado. ';
+    if (baja && alta && baja !== alta && baja.rendimiento < 0.95) txt += 'Por cada punto de espacio que ocupa, ' + esc(alta.nombre) + ' devuelve ' + nf1.format(alta.rendimiento) + ' puntos de ingreso y ' + esc(baja.nombre) + ' solo ' + nf1.format(baja.rendimiento) + ': ' + esc(baja.nombre) + ' ocupa más espacio del que pesa en ingresos. ';
+    else if (alta) txt += 'Todos los cursos aportan ingresos en proporción parecida al espacio que ocupan; el de mejor rendimiento es ' + esc(alta.nombre) + ' (' + nf1.format(alta.rendimiento) + 'x). ';
+    if (llen) txt += 'El llenado más bajo es el de ' + esc(llen.nombre) + ' (' + fP(llen.llenado) + ', ' + nf1.format(llen.est / llen.grupos) + ' estudiantes por grupo de ' + llen.cupo + ').';
+    if (T.hayMes) txt += '</p><p>En ' + C.keyLabel(S.mes) + ' iniciaron ' + fN(T.gMes) + ' grupos con ' + fN(T.insc) + ' inscritos' + (T.inscripcionesMes != null ? ' (las inscripciones totales del mes fueron ' + fN(T.inscripcionesMes) + ')' : '') + '.';
+    const mx = Math.max(...F.map(x => Math.max(x.pesoGrupos, x.pesoIng)), 0.01);
+    const filas = F.map(x => '<tr><td><b>' + esc(x.nombre) + '</b><div class="duo"><span class="dg" style="width:' + (x.pesoGrupos / mx * 100).toFixed(1) + '%"></span></div><div class="duo"><span class="di" style="width:' + (x.pesoIng / mx * 100).toFixed(1) + '%"></span></div></td>' +
+      '<td>' + fN(x.grupos) + '</td><td>' + fN(x.est) + '</td><td class="' + (x.llenado != null && x.llenado < 0.55 ? 'neg' : '') + '">' + fP(x.llenado) + '<div class="mini">' + (x.grupos ? nf1.format(x.est / x.grupos) + ' por grupo' : '') + '</div></td><td>' + fP(x.pctFranjas) + '</td>' +
+      '<td>' + fP(x.pesoGrupos) + '</td><td>' + fP(x.pesoIng) + '</td><td class="' + (x.rendimiento == null ? '' : x.rendimiento < 0.9 ? 'neg' : x.rendimiento > 1.05 ? 'pos' : '') + '">' + (x.rendimiento == null ? '—' : nf1.format(x.rendimiento).replace(/,0$/, ',0') + 'x') + '</td>' +
+      '</tr>').join('');
+    const tot = '<tr class="tot"><td>Total</td><td>' + fN(T.grupos) + '</td><td>' + fN(T.est) + '</td><td>' + fP(T.llenado) + '</td><td>' + fP(T.pctFranjas) + '</td><td>100%</td><td>100%</td><td>1,0x</td></tr>';
+    const mesCard = T.hayMes ? '<div class="card" style="padding:0"><div style="padding:18px 20px 6px"><h3 style="margin:0">Inscritos de ' + esc(C.keyLabel(S.mes)) + '</h3><p class="note" style="margin:4px 0 10px">Estudiantes de los grupos que iniciaron en el mes' + (T.inscripcionesMes != null ? '; inscripciones totales del mes: ' + fN(T.inscripcionesMes) : '') + '.</p></div><div class="tw"><table class="t compact"><tr><th>Curso</th><th>Grupos iniciados</th><th>Inscritos</th><th>Por grupo</th><th>Peso en inscritos</th><th>Peso en grupos activos</th></tr>' +
+      F.map(x => '<tr><td>' + esc(x.nombre) + '</td><td>' + fN(x.gMes) + '</td><td>' + fN(x.insc) + '</td><td>' + (x.gMes ? nf1.format(x.insc / x.gMes) : '—') + '</td><td>' + fP(x.pesoInsc) + '</td><td>' + fP(x.pesoGrupos) + '</td></tr>').join('') +
+      '<tr class="tot"><td>Total</td><td>' + fN(T.gMes) + '</td><td>' + fN(T.insc) + '</td><td>' + (T.gMes ? nf1.format(T.insc / T.gMes) : '—') + '</td><td>100%</td><td>100%</td></tr></table></div></div>' : '';
+    // matriz sede × curso
+    let matriz = '';
+    if (S.sede === 'Todas') {
+      const usar = T.hayMes ? 'insc' : 'est';
+      const cols = F.map(x => x.c);
+      const rows = C.NOMBRES_SEDES.map(s => ({ s, d: C.cursosDetalle(S.ds, s, S.mes) })).map(({ s, d }) => {
+        const by = Object.fromEntries(d.filas.map(x => [x.c, x])), tot = d.T[usar === 'insc' ? 'insc' : 'est'];
+        return '<tr class="click" data-sede="' + esc(s) + '"><td>' + esc(s) + '</td>' + cols.map(c => { const v = by[c][usar], sh = tot ? v / tot : 0; return '<td><span class="cel" style="background:rgba(21,101,232,' + (0.06 + sh * 0.9).toFixed(2) + ')">' + fN(v) + '</span></td>'; }).join('') + '<td><b>' + fN(tot) + '</b></td><td>' + fP(d.T.llenado) + '</td></tr>';
+      }).join('');
+      matriz = '<div class="card" style="padding:0;margin-top:20px"><div style="padding:18px 20px 6px"><h3 style="margin:0">' + (T.hayMes ? 'Inscritos de ' + C.keyLabel(S.mes) + ' por sede y curso' : 'Estudiantes activos por sede y curso') + '</h3><p class="note" style="margin:4px 0 10px">La intensidad del color muestra cuánto pesa cada curso dentro de la sede.</p></div><div class="tw"><table class="t compact"><tr><th>Sede</th>' + F.map(x => '<th>' + esc(x.nombre) + '</th>').join('') + '<th>Total</th><th>Llenado</th></tr>' + rows + '</table></div></div>';
+    }
+    return '<section class="section" id="s-cur"><p class="eyebrow">' + num() + ' — Detalle por curso</p><h2>Cursos: inscritos, ocupación y peso en ingresos</h2><div class="divider"></div>' +
+      '<div class="insight" style="margin-bottom:20px"><h4>Lectura</h4><p>' + txt + '</p></div>' +
+      '<div class="card cursos-t" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Curso</th><th>Grupos activos</th><th>Estudiantes</th><th>Llenado de cupos</th><th>% de franjas</th><th>Peso en grupos</th><th>Peso en ingresos</th><th>Rendimiento</th></tr>' + filas + tot + '</table></div>' +
+      '<div class="legend" style="padding:0 16px 14px"><span><i style="background:#0D1B2A"></i>Peso en grupos (espacio que usa)</span><span><i style="background:#1565E8"></i>Peso en ingresos estimado</span></div></div>' + (mesCard ? '<div style="margin-top:20px">' + mesCard + '</div>' : '') + matriz +
+      '<p class="note" style="color:#6B7C93">Llenado de cupos: estudiantes ÷ (grupos × cupo de ' + (S.ds.params.generales.cupo) + '). % de franjas: la ocupación de franjas de la sede repartida según la mezcla de grupos. Peso en ingresos: estudiantes activos × precio de lista ÷ duración del curso (estimado; el informe a socios no separa ingresos por curso). Rendimiento del espacio: peso en ingresos ÷ peso en grupos; menos de 1,0x significa que el curso ocupa más espacio del que aporta. Grupos y estudiantes activos: grupos iniciados de julio a noviembre de 2026; inscritos del mes: estudiantes de los grupos que iniciaron en el mes. Se actualizan en Parámetros.</p></section>';
   }
 
   function salonesCard() {
@@ -657,7 +698,9 @@
     const errores = [];
     root.querySelectorAll('[data-p]').forEach(el => {
       const [scope, ...path] = el.dataset.p.split('.'), t = el.dataset.t;
-      let obj = scope === 'g' ? S.ds.params.generales : S.ds.params.sedes[S.psede];
+      const PR = S.ds.params;
+      let obj = scope === 'g' ? PR.generales : scope === 'i' ? (PR.cursosInfo = PR.cursosInfo || {}) :
+        scope === 'm' ? (((PR.inscritosMes = PR.inscritosMes || {})[S.mes] = PR.inscritosMes[S.mes] || {})[S.psede] = PR.inscritosMes[S.mes][S.psede] || {}) : PR.sedes[S.psede];
       for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]] = obj[path[i]] || {};
       const k = path[path.length - 1];
       if (t === 'bool') { obj[k] = el.checked; return; }
@@ -681,10 +724,12 @@
     const vb = A('base', s), vv = A('vigente', s), cap = C.capacidad(S.ds, s);
     const opt = C.NOMBRES_SEDES.map(n => '<option' + (n === s ? ' selected' : '') + '>' + esc(n) + '</option>').join('');
     const pp = p.presupuestoPlan || {};
-    const cursos = '<table class="t mini-t"><tr><th>Curso</th><th>Grupos activos</th><th>Estudiantes</th><th>Programados</th></tr>' + C.CURSOS.map(([c, n]) => { const x = p.cursos[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="s.cursos.' + c + '.grupos" data-t="int" value="' + (x.grupos || 0) + '"></td><td><input data-p="s.cursos.' + c + '.estudiantes" data-t="int" value="' + (x.estudiantes || 0) + '"></td><td><input data-p="s.cursos.' + c + '.programados" data-t="int" value="' + (x.programados || 0) + '"></td></tr>'; }).join('') + '</table>';
+    const im = ((PR.inscritosMes || {})[S.mes] || {})[s] || {};
+    const cursos = '<div class="tw"><table class="t mini-t"><tr><th>Curso</th><th>Grupos activos</th><th>Estudiantes activos</th><th>Programados</th><th>Grupos iniciados ' + esc(C.keyLabel(S.mes, true)) + '</th><th>Inscritos ' + esc(C.keyLabel(S.mes, true)) + '</th></tr>' + C.CURSOS.map(([c, n]) => { const x = p.cursos[c] || {}, y = im[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="s.cursos.' + c + '.grupos" data-t="int" value="' + (x.grupos || 0) + '"></td><td><input data-p="s.cursos.' + c + '.estudiantes" data-t="int" value="' + (x.estudiantes || 0) + '"></td><td><input data-p="s.cursos.' + c + '.programados" data-t="int" value="' + (x.programados || 0) + '"></td><td><input data-p="m.' + c + '.grupos" data-t="int" value="' + (y.grupos || 0) + '"></td><td><input data-p="m.' + c + '.inscritos" data-t="int" value="' + (y.inscritos || 0) + '"></td></tr>'; }).join('') + '</table></div>' +
+      '<p class="note">Los inscritos del mes corresponden al mes elegido en el tablero (' + esc(C.keyLabel(S.mes)) + '). Para cargar otro mes, cámbielo en el filtro Mes del tablero y vuelva a Parámetros.</p>';
     const resumen = C.NOMBRES_SEDES.map(n => { const q = PR.sedes[n], v = A('vigente', n), b = A('base', n), fx = C.LINEAS_FIJAS.reduce((a, [k]) => a + (+q.presupuesto[k] || 0), 0); return '<tr class="click' + (n === s ? ' sel' : '') + '" data-psede="' + esc(n) + '"><td>' + esc(n) + '</td><td>' + q.salones + ' / ' + q.salonesPlan + ' / ' + q.salonesPosibles + '</td><td>' + q.gruposActivos + '</td><td>' + fN(q.estudiantesActivos) + '</td><td>' + fP(q.ocupPlan) + '</td><td>' + (q.kit ? 'Sí' : 'No') + '</td><td>' + fP2(q.incPrecio == null ? G.incPrecio : q.incPrecio) + '</td><td>' + fM(fx) + '</td><td class="' + (b.uai < 0 ? 'neg' : '') + '">' + fM(b.uai) + '</td><td class="' + (v.uai < 0 ? 'neg' : 'pos') + '">' + fM(v.uai) + '</td></tr>'; }).join('');
     const T = A('vigente', 'Todas');
-    const lateralP = '<nav class="side-nav" id="snav"><a href="#" class="volver" id="pvolver2">‹ Volver al tablero</a><div class="side-label">Generales</div><a href="#pgen" data-sec="pgen" data-q="parametros generales">Parámetros generales</a>' +
+    const lateralP = '<nav class="side-nav" id="snav"><a href="#" class="volver" id="pvolver2">‹ Volver al tablero</a><div class="side-label">Generales</div><a href="#pgen" data-sec="pgen" data-q="parametros generales">Parámetros generales</a><a href="#pcur" data-sec="pcur" data-q="cursos precio duracion">Cursos: precio y duración</a>' +
       '<div class="side-label">Sedes</div>' + C.NOMBRES_SEDES.map(n => '<a href="#" class="' + (n === s ? 'on' : '') + '" data-psede-nav="' + esc(n) + '" data-q="' + esc(norm(n)) + '">' + esc(n) + '</a>').join('') + '</nav>' +
       '<div class="side-foot"><button class="sbtn" id="pvolver">Volver al tablero</button><button class="sbtn" id="pguardar">Descargar respaldo</button></div>';
     $('#app').innerHTML = shell('Parámetros del tablero', lateralP, 'Parámetros<span class="ctx-sep">/</span>' + esc(s), '' +
@@ -704,7 +749,11 @@
       campo('Incremento de precio 2027', 'g.incPrecio', G.incPrecio, 'pct2', 'Efectivo, aplicado en cuotas') + campo('Incremento del plan base', 'g.incPrecioBase', G.incPrecioBase, 'pct2') + campo('Meses de rampa', 'g.mesesRampa', G.mesesRampa, 'int', 'Meses para que los activos lleguen a la nueva ocupación') +
       campo('Tasa de oportunidad (CDT)', 'g.tasaDescuento', G.tasaDescuento, 'pct') + campo('Meses de capital de trabajo', 'g.mesesCapitalTrabajo', G.mesesCapitalTrabajo, 'int') + campo('Ocupación para expandir', 'g.ocupExpansion', G.ocupExpansion, 'pct') + campo('Meses de maduración', 'g.mesesMaduracion', G.mesesMaduracion, 'int') +
       campo('Plazo máximo en pérdida (meses)', 'g.plazoMaxPerdida', G.plazoMaxPerdida, 'int') + campo('Horizonte de evaluación (meses)', 'g.horizonteMeses', G.horizonteMeses, 'int') + campo('Inversión de referencia sede nueva', 'g.inversionNuevaSede', G.inversionNuevaSede, 'pesos') + campo('Corte de datos operativos', 'g.corteOperativo', G.corteOperativo, 'mes') + '</div>' +
-      '<div class="row-actions"><button class="btn" id="pgaplicar">Aplicar generales</button></div><div id="pgerr"></div></div></div></div></section>' +
+      '<div class="row-actions"><button class="btn" id="pgaplicar">Aplicar generales</button></div><div id="pgerr"></div></div>' +
+      (PR.cursosInfo ? '<div class="card" id="pcur" style="margin-top:20px"><h3>Cursos: precio y duración</h3><p class="note" style="margin:0 0 10px">Se usan para estimar el peso de cada curso en los ingresos.</p><div class="tw"><table class="t mini-t"><tr><th>Curso</th><th>Precio lista</th><th>Duración (meses)</th><th>Cupo</th></tr>' +
+        C.CURSOS.map(([c, n]) => { const x = PR.cursosInfo[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="i.' + c + '.precio" data-t="pesos" value="' + esc(fmtIn(x.precio, 'pesos')) + '" style="max-width:120px"></td><td><input data-p="i.' + c + '.duracion" data-t="num" value="' + (x.duracion || '') + '"></td><td><input data-p="i.' + c + '.cupo" data-t="int" value="' + (x.cupo || '') + '"></td></tr>'; }).join('') +
+        '</table></div><div class="row-actions"><button class="btn" id="pcaplicar">Aplicar cursos</button></div><div id="pcerr"></div></div>' : '') +
+      '</div></div></section>' +
       '<section class="section"><p class="eyebrow">Resumen</p><h2>Parámetros de las 24 sedes</h2><div class="divider"></div><div class="card" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Salones hoy / 2027 / posibles</th><th>Grupos</th><th>Estudiantes</th><th>Ocupación 2027</th><th>Kit</th><th>Incremento</th><th>Fijos/mes</th><th>Utilidad base</th><th>Utilidad vigente</th></tr>' + resumen + '</table></div></div></section></main>' + footer());
     activarShell(false);
     { const act = document.querySelector('[data-psede-nav].on'); if (act) act.scrollIntoView({ block: 'center' }); window.scrollTo(0, 0); }
@@ -720,6 +769,7 @@
     };
     $('#paplicar').onclick = () => aplicar($('#pform'), '#perr');
     $('#pgaplicar').onclick = () => aplicar($('#pgen'), '#pgerr');
+    if ($('#pcaplicar')) $('#pcaplicar').onclick = () => aplicar($('#pcur'), '#pcerr');
     $('#preset').onclick = () => {
       const ini = S.ds.paramsInicial && S.ds.paramsInicial.sedes[s];
       if (!ini) { toast('No hay valores iniciales guardados para esta sede.'); return; }

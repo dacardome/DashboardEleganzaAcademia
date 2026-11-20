@@ -370,6 +370,46 @@
     const uaiPleno = V.uaiPleno.reduce((a, b) => a + b, 0);
     return { inversion, capTrabajo, total: inversion + capTrabajo, fijMes, uaiAnual, uaiPleno, uaiMes: uaiAnual / 12, vpn: vpn(tm), tir, payback, mesesNeg, primerPositivo, flujos, horizonte: H, tasa: G.tasaDescuento };
   }
+  /**
+   * Detalle por curso de una sede (o 'Todas') y un mes:
+   *   grupos y estudiantes activos (parámetros), ocupación de cupos = estudiantes / (grupos × cupo),
+   *   % de franjas = grupos del curso / franjas de la sede, peso en ingresos estimado = estudiantes × precio / duración,
+   *   rendimiento del espacio = peso en ingresos / peso en grupos, inscritos y grupos iniciados del mes.
+   */
+  function cursosDetalle(ds, sede, k) {
+    const P = ds.params, G = P.generales, info = P.cursosInfo || {};
+    const sedes = sede === 'Todas' ? NOMBRES_SEDES : [sede];
+    const cap = capacidad(ds, sede);
+    const mes = (P.inscritosMes || {})[k] || null;
+    const filas = CURSOS.map(([c, nombre]) => {
+      const i = info[c] || { precio: 0, duracion: 1, cupo: G.cupo };
+      let grupos = 0, est = 0, insc = 0, gMes = 0;
+      for (const s of sedes) {
+        const x = P.sedes[s].cursos[c] || {}; grupos += x.grupos || 0; est += x.estudiantes || 0;
+        if (mes && mes[s] && mes[s][c]) { insc += mes[s][c].inscritos || 0; gMes += mes[s][c].grupos || 0; }
+      }
+      return { c, nombre, grupos, est, insc, gMes, cupo: i.cupo || G.cupo, ingMes: est * (i.precio || 0) / (i.duracion || 1), precio: i.precio, duracion: i.duracion };
+    });
+    const T = filas.reduce((a, x) => { a.grupos += x.grupos; a.est += x.est; a.insc += x.insc; a.gMes += x.gMes; a.ingMes += x.ingMes; a.cupos += x.grupos * x.cupo; return a; }, { grupos: 0, est: 0, insc: 0, gMes: 0, ingMes: 0, cupos: 0 });
+    for (const x of filas) {
+      x.llenado = x.grupos ? x.est / (x.grupos * x.cupo) : null;
+
+      x.pesoGrupos = T.grupos ? x.grupos / T.grupos : 0;
+      x.pctFranjas = x.pesoGrupos * cap.ocupFranjas; // reparte la ocupación real de franjas según la mezcla de grupos
+      x.pesoEst = T.est ? x.est / T.est : 0;
+      x.pesoIng = T.ingMes ? x.ingMes / T.ingMes : 0;
+      x.pesoInsc = T.insc ? x.insc / T.insc : 0;
+      x.rendimiento = x.pesoGrupos ? x.pesoIng / x.pesoGrupos : null;
+      x.inscPorGrupo = x.gMes ? x.insc / x.gMes : null;
+    }
+    T.llenado = T.cupos ? T.est / T.cupos : null;
+    T.pctFranjas = cap.ocupFranjas;
+    T.franjas = cap.franjas;
+    T.hayMes = !!mes;
+    const tot = (P.inscripcionesTotal || {})[k];
+    T.inscripcionesMes = tot ? sedes.reduce((a, s) => a + (tot[s] || 0), 0) : null;
+    return { filas, T };
+  }
   function mesesDesde(k0, k1) { if (!k0) return null; const a = keyParts(k0), b = keyParts(k1); return (b.y - a.y) * 12 + (b.m - a.m); }
 
   // ------------------------------------------------------------------ 5. cifrado
@@ -456,6 +496,6 @@
     completar, sumar, real, plan, acumular, mesesReales, mesesPlan, porSede,
     deriveKey, deriveKeys, sha256hex, newKey, encryptDataset, decryptDataset, decryptWithKey, b64e, b64d,
     datasetVacio, incorporar,
-    CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, presupuestoMes, evaluarInversion, mesesDesde
+    CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, cursosDetalle, presupuestoMes, evaluarInversion, mesesDesde
   };
 });

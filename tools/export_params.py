@@ -157,6 +157,43 @@ params['tareas'] = [
     dict(id=8, resp='Jhonatan Castro', tarea='Analizar gastos y rendimiento de la sede Itagüí', estado='Pendiente'),
     dict(id=9, resp='Jefferson Gómez', tarea='Revisar si se pueden habilitar 3 salones adicionales en Venecia', estado='Pendiente'),
 ]
+# ---- cursos: precio y duración (hoja Cursos) e inscritos por mes y curso (Power BI)
+wc = wb['Cursos']
+fam = {'Manicure': 'MAN', 'Maquillaje': 'MAQ', 'Barbería': 'BAR', 'Cejas y pestañas': 'CEJ', 'Estilismo': 'EST', 'Peinados': 'PEI', 'Masajes': 'MAS'}
+info = {}
+for r in wc.iter_rows(min_row=6, max_row=12, values_only=True):
+    if r[0] in fam:
+        info[fam[r[0]]] = dict(nombre=r[0], precio=float(r[1]), pagos=int(r[2]), duracion=float(r[13]), cupo=int(r[4]))
+params['cursosInfo'] = {k: info[k] for k, _ in CURSOS}
+meses_coh = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11']
+insc = {k: {n: {c: dict(grupos=0, inscritos=0) for c, _ in CURSOS} for n in nombres} for k in meses_coh}
+for line in open(f'{PBI}/cohorts.txt', encoding='utf8'):
+    if line.startswith('#') or '|' not in line:
+        continue
+    left, vals = line.strip().split(':', 1)
+    city, fm = left.split('|')
+    n = canon(city)
+    if not n or fm not in dict(CURSOS):
+        continue
+    for i, c in enumerate(vals.split(',')[:6]):
+        if c:
+            g, e = (int(x) for x in c.split('/'))
+            insc[meses_coh[i]][n][fm] = dict(grupos=g, inscritos=e)
+params['inscritosMes'] = insc
+tot = {}
+for line in open(f'{PBI}/insc_all.txt', encoding='utf8'):
+    if line.startswith('#') or ':' not in line:
+        continue
+    name, vals = line.strip().split(':', 1)
+    n = canon(name)
+    if not n:
+        continue
+    v = vals.split(',')
+    for m in range(11):
+        x = v[13 + m]
+        tot.setdefault(f'2026-{m + 1:02d}', {})[n] = int(x) if x else 0
+params['inscripcionesTotal'] = tot
+
 params['generado'] = datetime.datetime.now().isoformat(timespec='seconds')
 params['version'] = 1
 json.dump(params, open(OUT, 'w'), ensure_ascii=False, indent=1)
