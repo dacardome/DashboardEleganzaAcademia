@@ -10,8 +10,11 @@
 'use strict';
 const crypto = require('crypto');
 
-const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// Variables que crea Vercel al conectar Upstash for Redis (con cualquier prefijo: KV_, STORAGE_, etc.)
+const envFin = sufijo => process.env['KV_' + sufijo] || process.env['UPSTASH_REDIS_' + sufijo.replace('_API', '')] ||
+  Object.entries(process.env).filter(([k]) => k.endsWith('_' + sufijo) && !k.includes('READ_ONLY')).map(([, v]) => v)[0];
+const URL_ = envFin('REST_API_URL');
+const TOKEN = envFin('REST_API_TOKEN');
 const P = 'eza:'; // prefijo de llaves
 const K = { datos: P + 'dataset', version: P + 'version', auth: P + 'auth', historial: P + 'historial' };
 const MAX_BYTES = 3 * 1024 * 1024;
