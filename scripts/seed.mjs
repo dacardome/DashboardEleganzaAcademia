@@ -22,7 +22,10 @@ export function leerLibro(file) {
 }
 
 const planData = JSON.parse(fs.readFileSync(path.join(RAW, 'plan2027.json'), 'utf8'));
-const ds = C.datasetVacio(planData);
+const paramsPath = path.join(RAW, 'params_init.json');
+const params = fs.existsSync(paramsPath) ? JSON.parse(fs.readFileSync(paramsPath, 'utf8')) : null;
+const ds = C.datasetVacio(planData, params);
+if (params) ds.paramsInicial = JSON.parse(JSON.stringify(params));
 for (const f of fs.readdirSync(RAW).filter(f => /\.xlsx?$/i.test(f)).sort()) {
   const parsed = C.parseInforme(leerLibro(path.join(RAW, f)), process.env['MES_' + f] ? '' : f);
   const k = process.env['MES_' + f] || parsed.periodo || process.env.MES;

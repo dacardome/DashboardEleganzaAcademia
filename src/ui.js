@@ -4,7 +4,8 @@
   const C = window.EACore;
   const $ = (sel, el) => (el || document).querySelector(sel);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const S = { env: null, ds: null, key: null, salt: null, sede: 'Todas', mes: null, esc: 'base' };
+  const S = { env: null, ds: null, key: null, salt: null, sede: 'Todas', mes: null, esc: 'vigente', dirty: false, psede: null };
+  let nsec = 0; const num = () => String(++nsec).padStart(2, '0');
 
   // ------------------------------------------------------------ formato
   const nf1 = new Intl.NumberFormat('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -51,6 +52,7 @@
       try {
         const r = await C.decryptDataset(S.env, pin);
         S.ds = r.ds; S.key = r.key; S.salt = C.b64d(S.env.kdf.salt);
+        if (!S.ds.params) S.esc = 'base'; else C.recalcular(S.ds);
         const reales = C.mesesReales(S.ds);
         S.mes = reales.length ? reales[reales.length - 1] : C.mesesPlan(S.ds)[0];
         render();
@@ -87,14 +89,18 @@
       '<div class="field"><label for="fsede">Sede</label><select id="fsede">' + optsSede + '</select></div>' +
       '<div class="field"><label for="fmes">Mes</label><select id="fmes">' + optsMes + '</select></div>' +
       '<div class="field"><label for="fesc">Comparar con</label><select id="fesc">' + optsEsc + '</select></div>' +
-      '<button class="btn small" id="bcargar">Cargar informe</button><button class="btn ghost small" id="bconf">Configuración</button></div></div>' +
-      '<nav class="navlinks"><a href="#s-res">Resultados del mes</a><a href="#s-ten">Tendencia</a><a href="#s-sed">Sedes</a><a href="#s-gas">Gastos</a><a href="#s-plan">Plan 2027</a><a href="#s-cri">Sedes críticas</a></nav></header>' +
-      hero(V) + '<main>' + kpis(V) + secResultados(V) + secTendencia() + secSedes() + secGastos(V) + secPlan() + secCriticas() + '</main>' + footer();
+      '<button class="btn small" id="bcargar">Cargar informe</button>' + (ds.params ? '<button class="btn ghost small" id="bparam">Parámetros</button>' : '') + '<button class="btn ghost small" id="bconf">Configuración</button></div></div>' +
+      '<nav class="navlinks"><a href="#s-res">Resultados</a>' + (ds.params ? '<a href="#s-cap">Capacidad</a><a href="#s-pre">Presupuesto vs ejecución</a>' : '') + '<a href="#s-ten">Tendencia</a><a href="#s-sed">Sedes</a><a href="#s-gas">Gastos</a><a href="#s-plan">Plan 2027</a>' + (ds.params ? '<a href="#s-dec">Decisiones 19-nov</a><a href="#s-nue">Sedes nuevas</a>' : '<a href="#s-cri">Sedes críticas</a>') + '</nav></header>' +
+      (S.dirty ? '<div class="aviso aviso-top">Hay cambios de parámetros sin guardar en GitHub. <a href="#" id="bguardar2">Guardar y descargar dataset.json</a></div>' : '') +
+      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secCapacidad() + secPresupuesto(V) + secTendencia() + secSedes() + secGastos(V) + secPlan() + (ds.params ? secDecisiones() + secNuevas() : secCriticas()) + '</main>' + footer();
     $('#fsede').onchange = e => { S.sede = e.target.value; render(); };
     $('#fmes').onchange = e => { S.mes = e.target.value; render(); };
     $('#fesc').onchange = e => { S.esc = e.target.value; render(); };
     $('#bcargar').onclick = modalCargar;
     $('#bconf').onclick = modalConfig;
+    if ($('#bparam')) $('#bparam').onclick = () => { S.psede = S.sede !== 'Todas' ? S.sede : S.psede; renderParams(); window.scrollTo(0, 0); };
+    if ($('#bguardar2')) $('#bguardar2').onclick = e => { e.preventDefault(); guardarParams().then(render); };
+    document.querySelectorAll('.tarea-est').forEach(el => el.onchange = () => { S.ds.params.tareas[+el.dataset.i].estado = el.value; S.dirty = true; toast('Estado actualizado. Guarde los parámetros para publicarlo.'); });
     document.querySelectorAll('tr[data-sede]').forEach(tr => tr.onclick = () => { S.sede = tr.dataset.sede; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
   }
 
@@ -144,11 +150,16 @@
       card('Pauta / ingresos', fP(X.pauP), cap(X.pauP, ref && ref.pauP, fP, 'menos')) +
       card('Utilidad de gestión', fM(X.uai), cap(X.uai, ref && ref.uai, fM), X.uai < 0) +
       card('Punto de equilibrio', fM(X.pe), 'Margen de seguridad: <span class="' + sgn(X.ms) + '">' + fP(X.ms) + '</span>');
+    if (S.ds.params) {
+      const T = C.capacidad(S.ds, S.sede);
+      h += card('Ocupación de franjas', fP(T.ocupFranjas), fN(T.grupos) + ' grupos en ' + fN(T.franjas) + ' franjas · ' + T.salones + ' salones');
+      h += card('Estudiantes activos', fN(T.estudiantes), fP(T.ocupCupos) + ' de ' + fN(T.cupos) + ' cupos · deserción ' + fP(T.desercion));
+    }
     if (S.sede === 'Todas') {
       const filas = C.porSede(S.ds, S.mes, S.esc).map(x => x.real || x.plan).filter(Boolean);
       const pos = filas.filter(x => x.uai > 0).length;
       h += card('Sedes con utilidad', pos + ' de ' + filas.length, V.R ? 'Resultado real del mes' : 'Según el ' + C.ESCENARIOS[S.esc].toLowerCase());
-    } else {
+    } else if (!S.ds.params) {
       const cp = S.ds.plan && S.ds.plan.capacidad[S.sede];
       if (cp) h += card('Ocupación de franjas', fP(cp.ocupHist), cp.salones + ' salones · ' + cp.franjas + ' franjas · plan 2027: ' + fP(cp.ocup2027));
     }
@@ -187,7 +198,7 @@
       rows += extra.map(([t, k]) => '<tr class="det"><td>' + t + '</td><td class="' + (X[k] < 0 ? 'neg' : '') + '">' + fM(X[k]) + '</td>' + cols.slice(1).map(() => '<td></td>').join('') + '</tr>').join('');
     }
     const head = '<tr><th>Concepto</th>' + cols.map(c => '<th>' + esc(c[0]) + '</th>').join('') + '</tr>';
-    return '<section class="section" id="s-res"><p class="eyebrow">01 — Resultados del mes</p><h2>Estado de resultados de gestión</h2><div class="divider"></div>' +
+    return '<section class="section" id="s-res"><p class="eyebrow">' + num() + ' — Resultados del mes</p><h2>Estado de resultados de gestión</h2><div class="divider"></div>' +
       '<p class="lead">Mismo criterio del plan 2027: los costos que dependen de estudiantes y grupos van antes del margen de contribución; la pauta, el corporativo y los financieros después. ' + (X ? 'Los no recurrentes y las compras de activos se muestran aparte.' : '') + '</p>' +
       '<div class="grid g-side"><div class="card" style="padding:0"><div class="tw"><table class="t">' + head + rows + '</table></div></div>' + insightVariaciones(V) + '</div></section>';
   }
@@ -253,7 +264,7 @@
     } else if (S.ds.plan) {
       ytd = '<p class="note" style="margin-top:12px;color:#6B7C93">El acumulado real contra el plan arranca con el informe de enero de ' + S.ds.plan.anio + '. Mientras tanto, la tendencia muestra los meses reales cargados y el plan mes a mes.</p>';
     }
-    return '<section class="section" id="s-ten"><p class="eyebrow">02 — Tendencia</p><h2>Mes a mes: real frente al plan</h2><div class="divider"></div>' +
+    return '<section class="section" id="s-ten"><p class="eyebrow">' + num() + ' — Tendencia</p><h2>Mes a mes: real frente al plan</h2><div class="divider"></div>' +
       '<div class="grid g2"><div class="card"><h3>Ingresos</h3>' + chartBarLine(lab, R.map(x => x && x.ing), P.map(x => x && x.ing), { titulo: 'Ingresos mensuales' }) + '</div>' +
       '<div class="card"><h3>Utilidad de gestión</h3>' + chartBarLine(lab, R.map(x => x && x.uai), P.map(x => x && x.uai), { titulo: 'Utilidad mensual' }) + '</div></div>' + ytd + '</section>';
   }
@@ -271,7 +282,7 @@
     rows += '<tr class="tot"><td>Total empresa</td><td>' + fM(T.ing) + '</td><td>' + fP(T.mcP) + '</td><td>' + fP(T.pauP) + '</td><td>' + fM(T.con) + '</td><td class="' + (T.uai < 0 ? 'neg' : '') + '">' + fM(T.uai) + '</td><td>' + fP(T.uaiP) + '</td>' + (conPlan ? '<td></td><td></td>' : '') + '</tr>';
     const pos = filas.filter(x => x.X.uai > 0), neg = filas.filter(x => x.X.uai < 0);
     const sp = pos.reduce((a, x) => a + x.X.uai, 0), sn = neg.reduce((a, x) => a + x.X.uai, 0);
-    return '<section class="section" id="s-sed"><p class="eyebrow">03 — Sedes</p><h2>Resultado por sede · ' + nombreMes(S.mes) + (esReal ? '' : ' (plan)') + '</h2><div class="divider"></div>' +
+    return '<section class="section" id="s-sed"><p class="eyebrow">' + num() + ' — Sedes</p><h2>Resultado por sede · ' + nombreMes(S.mes) + (esReal ? '' : ' (plan)') + '</h2><div class="divider"></div>' +
       '<p class="lead">' + pos.length + ' sedes aportan ' + fM(sp) + ' y ' + neg.length + ' restan ' + fM(Math.abs(sn)) + (sp ? ': las sedes en pérdida se comen el ' + nf0.format(Math.abs(sn) / sp * 100) + '% de lo que generan las demás.' : '.') + ' Haga clic en una sede para ver su detalle.</p>' +
       '<div class="grid g2"><div class="card" style="padding:0"><div class="tw"><table class="t"><tr><th>Sede</th><th>Ingresos</th><th>MC %</th><th>Pauta %</th><th>Contribución</th><th>Utilidad</th><th>Margen</th>' + (conPlan ? '<th>Utilidad plan</th><th>Var.</th>' : '') + '</tr>' + rows + '</table></div></div>' +
       '<div class="card"><h3>Utilidad de gestión por sede ($ millones)</h3>' + chartSedes(filas.map(x => ({ n: x.sede, v: x.X.uai }))) + '</div></div></section>';
@@ -300,7 +311,7 @@
       top = '<div class="card"><h3>Cuentas con mayor gasto del mes</h3><div class="tw"><table class="t"><tr><th>Cuenta</th><th>Valor</th><th>% ventas</th></tr>' +
         lista.map(x => '<tr><td>' + esc(x.c.nombre) + '<div class="mini">' + esc(x.c.cta || '') + ' · ' + esc(nom[x.c.clase] || x.c.clase) + '</div></td><td>' + fM(x.v) + '</td><td>' + fP(V.R.ing ? x.v / V.R.ing : null) + '</td></tr>').join('') + '</table></div></div>';
     }
-    return '<section class="section" id="s-gas"><p class="eyebrow">04 — Gastos</p><h2>Gastos por categoría</h2><div class="divider"></div>' +
+    return '<section class="section" id="s-gas"><p class="eyebrow">' + num() + ' — Gastos</p><h2>Gastos por categoría</h2><div class="divider"></div>' +
       '<div class="grid g2"><div class="card" style="padding:0"><div class="tw"><table class="t"><tr><th>Categoría</th><th>' + (V.R ? 'Real' : 'Plan') + '</th><th>% ventas</th>' + (ref ? '<th>' + refN + '</th><th>Var.</th>' : '') + '</tr>' + rows + '</table></div>' +
       (ref ? '<p class="note" style="padding:0 16px 14px">La línea negra en cada barra marca el valor de referencia (' + refN.toLowerCase() + ').</p>' : '') + '</div>' + (top || '<div></div>') + '</div></section>';
   }
@@ -311,7 +322,7 @@
     const ks = C.mesesPlan(S.ds);
     const anual = e => C.acumular(k => C.plan(S.ds, e, k, S.sede), ks);
     const perdidas = e => C.NOMBRES_SEDES.filter(s => C.acumular(k => C.plan(S.ds, e, k, s), ks).uai < 0).length;
-    const cards = Object.entries(C.ESCENARIOS).map(([e, t]) => {
+    const cards = Object.entries(C.ESCENARIOS).filter(([e]) => PL.plan[e]).map(([e, t]) => {
       const A = anual(e);
       return '<div class="esc' + (e === S.esc ? ' on' : '') + '"><div class="nm">' + t + '</div><div class="big' + (A.uai < 0 ? ' neg' : '') + '">' + fM(A.uai) + '</div><div style="color:#6B7C93;font-size:13px">Utilidad de gestión ' + PL.anio + ' · ' + fP(A.uaiP) + '</div>' +
         '<dl><dt>Ingresos</dt><dd>' + fM(A.ing) + '</dd><dt>Margen de contribución</dt><dd>' + fP(A.mcP) + '</dd><dt>Pauta</dt><dd>' + fM(A.pau) + '</dd><dt>Punto de equilibrio mensual</dt><dd>' + fM(A.pe / 12) + '</dd><dt>Margen de seguridad</dt><dd>' + fP(A.ms) + '</dd>' +
@@ -319,7 +330,9 @@
     }).join('');
     const Ms = ks.map(k => C.plan(S.ds, S.esc, k, S.sede));
     const gk = S.esc === 'ajustado' ? 'ajustado' : 'base';
-    const grupos = i => S.sede === 'Todas' ? Object.values(PL.grupos[gk]).reduce((a, g) => a + g[i], 0) : (PL.grupos[gk][S.sede] || [])[i];
+    // grupos nuevos enteros: los del plan; en el presupuesto vigente, los del plan base por el factor de volumen de cada sede, redondeados
+    const gSede = (s, i) => S.esc === 'vigente' ? Math.round(((PL.grupos.base[s] || [])[i] || 0) * PL.plan.vigente[s].f) : ((PL.grupos[gk][s] || [])[i] || 0);
+    const grupos = i => S.sede === 'Todas' ? C.NOMBRES_SEDES.reduce((a, s) => a + gSede(s, i), 0) : gSede(S.sede, i);
     const fila = (t, fn, f, cls) => '<tr class="' + (cls || '') + '"><td>' + t + '</td>' + Ms.map((x, i) => { const v = fn(x, i); return '<td class="' + (f === fM && v < 0 ? 'neg' : '') + '">' + f(v) + '</td>'; }).join('') + '<td><b>' + (fn === null ? '' : f(fn(C.acumular(k => C.plan(S.ds, S.esc, k, S.sede), ks), -1))) + '</b></td></tr>';
     const sumG = Array.from({ length: 12 }, (_, i) => grupos(i)).reduce((a, b) => a + (b || 0), 0);
     const tabla = '<table class="t compact"><tr><th>' + esc(C.ESCENARIOS[S.esc]) + '</th>' + ks.map(k => '<th>' + C.keyLabel(k, true) + '</th>').join('') + '<th>Año</th></tr>' +
@@ -329,9 +342,9 @@
       '<tr><td>Inscritos nuevos</td>' + Ms.map(x => '<td>' + fN(x.nue) + '</td>').join('') + '<td><b>' + fN(Ms.reduce((a, x) => a + x.nue, 0)) + '</b></td></tr>' +
       '<tr><td>Estudiantes activos</td>' + Ms.map(x => '<td>' + fN(x.act) + '</td>').join('') + '<td><b>' + fN(Ms.reduce((a, x) => a + x.act, 0) / 12) + '</b></td></tr>' +
       '<tr><td>Grupos activos</td>' + Ms.map(x => '<td>' + fN(x.ga) + '</td>').join('') + '<td><b>' + fN(Ms.reduce((a, x) => a + x.ga, 0) / 12) + '</b></td></tr></table>';
-    return '<section class="section" id="s-plan"><p class="eyebrow">05 — Plan financiero ' + PL.anio + '</p><h2>Tres escenarios para ' + esc(S.sede === 'Todas' ? 'la empresa' : S.sede) + '</h2><div class="divider"></div>' +
-      '<p class="lead">Plan base: ocupación histórica de cada sede. Plan ajustado: ocupación necesaria en las sedes críticas para llegar al margen meta de ' + fP2(PL.meta) + '. Sin kit y sin aumento: el plan base sin el 5% de aumento de precio y sin el costo del kit. Los grupos a abrir son números enteros.</p>' +
-      '<div class="grid g3">' + cards + '</div><div class="card" style="margin-top:20px;padding:0"><div class="tw">' + tabla + '</div></div></section>';
+    return '<section class="section" id="s-plan"><p class="eyebrow">' + num() + ' — Plan financiero ' + PL.anio + '</p><h2>Escenarios para ' + esc(S.sede === 'Todas' ? 'la empresa' : S.sede) + '</h2><div class="divider"></div>' +
+      '<p class="lead">' + (PL.plan.vigente ? 'Presupuesto vigente: plan base con los parámetros actuales y las decisiones del 19 de noviembre (incremento de ' + fP2(S.ds.params.generales.incPrecio) + ' en cuotas, Barrancabermeja, Sincelejo, Venecia y Zipaquirá). ' : '') + 'Plan base: ocupación histórica de cada sede. Plan ajustado: ocupación necesaria en las sedes críticas para llegar al margen meta de ' + fP2(PL.meta) + '. Sin kit y sin aumento: el plan base sin el 5% de aumento de precio y sin el costo del kit. Los grupos a abrir son números enteros.</p>' +
+      '<div class="grid g4">' + cards + '</div><div class="card" style="margin-top:20px;padding:0"><div class="tw">' + tabla + '</div></div></section>';
   }
 
   // ------------------------------------------------------------ 06 sedes críticas
@@ -340,13 +353,233 @@
     const ks = C.mesesPlan(S.ds);
     const crit = C.NOMBRES_SEDES.filter(s => PL.criticas[s] && PL.criticas[s].critica);
     const lista = (S.sede === 'Todas' ? crit : crit.filter(s => s === S.sede));
-    if (!lista.length) return S.sede === 'Todas' ? '' : '<section class="section" id="s-cri"><p class="eyebrow">06 — Sedes críticas</p><h2>' + esc(S.sede) + ' no es sede crítica</h2><div class="divider"></div><p class="lead">En el plan base esta sede tiene utilidad positiva.</p></section>';
+    if (!lista.length) return S.sede === 'Todas' ? '' : '<section class="section" id="s-cri"><p class="eyebrow">' + num() + ' — Sedes críticas</p><h2>' + esc(S.sede) + ' no es sede crítica</h2><div class="divider"></div><p class="lead">En el plan base esta sede tiene utilidad positiva.</p></section>';
     const u = (e, s) => C.acumular(k => C.plan(S.ds, e, k, s), ks).uai;
     const rows = lista.map(s => ({ s, c: PL.criticas[s], ub: u('base', s), ua: u('ajustado', s) })).sort((a, b) => a.ub - b.ub).map(x =>
       '<tr class="click" data-sede="' + esc(x.s) + '"><td><b>' + esc(x.s) + '</b></td><td>' + fP(x.c.ocupBase) + ' → ' + fP(x.c.ocupAj) + '</td><td>' + fN(x.c.inscMesReq) + ' vs ' + fN(x.c.inscMesHist) + '</td><td class="neg">' + fM(x.ub) + '</td><td class="' + (x.ua < 0 ? 'neg' : 'pos') + '">' + fM(x.ua) + '</td><td style="text-align:left;white-space:normal;min-width:320px;font-size:13px">' + esc(x.c.accion || '') + '</td></tr>').join('');
-    return '<section class="section" id="s-cri"><p class="eyebrow">06 — Sedes críticas</p><h2>Qué tiene que cambiar para llegar a ' + fP2(PL.meta) + ' de margen</h2><div class="divider"></div>' +
+    return '<section class="section" id="s-cri"><p class="eyebrow">' + num() + ' — Sedes críticas</p><h2>Qué tiene que cambiar para llegar a ' + fP2(PL.meta) + ' de margen</h2><div class="divider"></div>' +
       '<p class="lead">Sedes con utilidad negativa en el plan base. Ocupación de franjas base → ajustada, inscritos por mes que requiere el ajuste frente a 2026, y la acción sugerida.</p>' +
       '<div class="card" style="padding:0"><div class="tw"><table class="t"><tr><th>Sede</th><th>Ocupación</th><th>Inscritos/mes vs 2026</th><th>Utilidad base</th><th>Utilidad ajustada</th><th style="text-align:left">Qué hacer</th></tr>' + rows + '</table></div></div></section>';
+  }
+
+  // ------------------------------------------------------------ 02 capacidad y ocupación
+  const fPesos = v => v == null || isNaN(v) ? '—' : (v < 0 ? '−$' : '$') + nf0.format(Math.abs(Math.round(v)));
+  const barra = (v, max, cls) => '<div class="mbar"><i class="' + (cls || '') + '" style="width:' + Math.max(0, Math.min(100, (v || 0) / (max || 1) * 100)).toFixed(1) + '%"></i></div>';
+  const nombreCurso = Object.fromEntries(C.CURSOS);
+  function secCapacidad() {
+    if (!S.ds.params) return '';
+    const G = S.ds.params.generales, T = C.capacidad(S.ds, S.sede);
+    const filas = C.NOMBRES_SEDES.map(s => ({ s, c: C.capacidad(S.ds, s), p: S.ds.params.sedes[s] })).sort((a, b) => b.c.ocupFranjas - a.c.ocupFranjas);
+    const sinHab = filas.filter(x => x.p.salonesPosibles > x.p.salones);
+    let txt;
+    if (S.sede === 'Todas') {
+      const bajas = filas.slice(-4).reverse();
+      txt = 'La empresa opera <b>' + fN(T.salones) + ' salones</b> en 24 sedes, que equivalen a <b>' + fN(T.franjas) + ' franjas</b> semanales (' + G.franjasSalon + ' por salón; cada franja aloja un grupo durante todo el curso) y a ' + fN(T.cupos) + ' cupos con grupos de ' + G.cupo + '. ' +
+        'Hoy hay <b>' + fN(T.grupos) + ' grupos activos</b>, una ocupación de <b>' + fP(T.ocupFranjas) + '</b> de las franjas, y <b>' + fN(T.estudiantes) + ' estudiantes activos</b>, el ' + fP(T.ocupCupos) + ' de los cupos. ' +
+        'Antes del tope operativo de ' + fP(G.topeOcupacion) + ' se pueden habilitar <b>' + fN(T.habilitables) + ' grupos más</b> en los salones actuales' +
+        (sinHab.length ? ', y hay ' + fN(sinHab.reduce((a, x) => a + x.p.salonesPosibles - x.p.salones, 0)) + ' salones posibles sin habilitar (' + sinHab.map(x => esc(x.s) + ' ' + x.p.salones + ' de ' + x.p.salonesPosibles).join(', ') + ').' : '.') +
+        ' Las sedes con menor ocupación son ' + bajas.map(x => esc(x.s) + ' (' + fP(x.c.ocupFranjas) + ')').join(', ') + '.';
+    } else {
+      const p = S.ds.params.sedes[S.sede];
+      txt = esc(S.sede) + ' tiene <b>' + T.salones + ' salones</b>' + (T.salonesPosibles > T.salones ? ' habilitados de ' + T.salonesPosibles + ' posibles' : '') + ', ' + fN(T.franjas) + ' franjas y ' + fN(T.cupos) + ' cupos. Hoy tiene <b>' + fN(T.grupos) + ' grupos activos</b> (ocupación de ' + fP(T.ocupFranjas) + ') y <b>' + fN(T.estudiantes) + ' estudiantes activos</b> (' + fP(T.ocupCupos) + ' de los cupos). ' +
+        'Puede habilitar ' + fN(T.habilitables) + ' grupos más antes del tope de ' + fP(G.topeOcupacion) + '. La deserción histórica es ' + fP(T.desercion) + ' y el costo de adquisición por inscrito es ' + fPesos(T.cac) + '.' +
+        (p.salonesPlan !== p.salones ? ' En el presupuesto vigente opera con ' + p.salonesPlan + ' salones.' : '') + (p.nota ? '</p><p>' + esc(p.nota) : '');
+    }
+    const mxE = Math.max(...C.CURSOS.map(([c]) => T.cursos[c].estudiantes), 1);
+    const cursos = C.CURSOS.map(([c, n]) => { const x = T.cursos[c]; return x.grupos || x.programados ? '<tr><td>' + n + barra(x.estudiantes, mxE) + '</td><td>' + fN(x.grupos) + '</td><td>' + fN(x.estudiantes) + '</td><td>' + (x.grupos ? nf1.format(x.estudiantes / x.grupos) : '—') + '</td><td>' + fN(x.programados) + '</td></tr>' : ''; }).join('');
+    const rows = filas.map(x => { const c = x.c; return '<tr class="click' + (x.s === S.sede ? ' sel' : '') + '" data-sede="' + esc(x.s) + '"><td>' + esc(x.s) + '</td><td>' + c.salones + (c.salonesPosibles > c.salones ? '<span class="mini-in"> de ' + c.salonesPosibles + '</span>' : '') + '</td><td>' + fN(c.franjas) + '</td><td>' + fN(c.cupos) + '</td><td>' + fN(c.grupos) + '</td><td>' + fN(c.estudiantes) + '</td><td class="' + (c.ocupFranjas < 0.35 ? 'neg' : '') + '">' + fP(c.ocupFranjas) + barra(c.ocupFranjas, 1, c.ocupFranjas < 0.35 ? 'r' : '') + '</td><td>' + fP(c.ocupCupos) + '</td><td>' + fN(c.habilitables) + '</td><td>' + fP(c.desercion) + '</td><td>' + fPesos(c.cac) + '</td></tr>'; }).join('');
+    const E = C.capacidad(S.ds, 'Todas');
+    const tot = '<tr class="tot"><td>Total empresa</td><td>' + fN(E.salones) + '</td><td>' + fN(E.franjas) + '</td><td>' + fN(E.cupos) + '</td><td>' + fN(E.grupos) + '</td><td>' + fN(E.estudiantes) + '</td><td>' + fP(E.ocupFranjas) + '</td><td>' + fP(E.ocupCupos) + '</td><td>' + fN(E.habilitables) + '</td><td>' + fP(E.desercion) + '</td><td>' + fPesos(E.cac) + '</td></tr>';
+    return '<section class="section" id="s-cap"><p class="eyebrow">' + num() + ' — Capacidad y ocupación</p><h2>Salones, grupos, estudiantes y cursos</h2><div class="divider"></div>' +
+      '<div class="insight" style="margin-bottom:20px"><h4>Lectura</h4><p>' + txt + '</p></div>' +
+      '<div class="card" style="padding:0;margin-bottom:20px"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Salones</th><th>Franjas</th><th>Cupos</th><th>Grupos activos</th><th>Estudiantes activos</th><th>Ocup. franjas</th><th>Ocup. cupos</th><th>Grupos habilitables</th><th>Deserción</th><th>CAC</th></tr>' + rows + tot + '</table></div></div>' +
+      '<div class="grid g2"><div class="card"><h3>Cursos asignados · ' + esc(S.sede === 'Todas' ? 'empresa' : S.sede) + '</h3><div class="tw"><table class="t"><tr><th>Curso</th><th>Grupos</th><th>Estudiantes</th><th>Est./grupo</th><th>Programados dic-ene</th></tr>' + cursos +
+      '<tr class="tot"><td>Total</td><td>' + fN(T.gruposCursos) + '</td><td>' + fN(T.estCursos) + '</td><td>' + (T.gruposCursos ? nf1.format(T.estCursos / T.gruposCursos) : '—') + '</td><td>' + fN(T.programados) + '</td></tr></table></div>' +
+      '<p class="note">Grupos activos y ocupación: grupos simultáneos de octubre de 2026. Estudiantes activos: estado Activo en Power BI (corte ' + esc(G.corteOperativo) + '). Cursos: grupos iniciados entre julio y noviembre. Grupos habilitables: franjas hasta el tope de ' + fP(G.topeOcupacion) + ' menos grupos activos. Todo se edita en Parámetros.</p></div>' + salonesCard() + '</div></section>';
+  }
+
+  function salonesCard() {
+    const G = S.ds.params.generales, P = S.ds.params.sedes;
+    const lista = (S.sede === 'Todas' ? C.NOMBRES_SEDES : [S.sede]).map(s => ({ s, p: P[s], c: C.capacidad(S.ds, s) }));
+    const rows = lista.filter(x => S.sede !== 'Todas' || x.p.salonesPosibles > x.p.salones || x.p.salonesPlan !== x.p.salones || x.c.habilitables >= 30).sort((a, b) => b.c.habilitables - a.c.habilitables).map(x =>
+      '<tr><td>' + esc(x.s) + '</td><td>' + x.p.salones + '</td><td>' + x.p.salonesPlan + '</td><td>' + x.p.salonesPosibles + '</td><td>' + fN(x.c.habilitables) + '</td><td>' + fN((x.p.salonesPosibles - x.p.salones) * G.franjasSalon) + '</td></tr>').join('');
+    return '<div class="card"><h3>Salones: hoy, plan 2027 y posibles</h3><div class="tw"><table class="t"><tr><th>Sede</th><th>Hoy</th><th>2027</th><th>Posibles</th><th>Habilitables</th><th>Franjas extra</th></tr>' + (rows || '<tr><td colspan="6">Sin cambios de salones.</td></tr>') + '</table></div>' +
+      '<p class="note">' + (S.sede === 'Todas' ? 'Sedes con salones por habilitar, cambios de salones en 2027 o 30 grupos habilitables o más. ' : '') + 'Grupos habilitables: capacidad libre en los salones actuales hasta el tope de ' + fP(G.topeOcupacion) + '. Franjas extra: espacio adicional si se habilitan los salones posibles.</p></div>';
+  }
+
+  // ------------------------------------------------------------ 03 presupuesto vs ejecución
+  function secPresupuesto(V) {
+    if (!S.ds.params) return '';
+    const B = C.presupuestoMes(S.ds, S.mes, S.sede), X = V.R;
+    if (!B) return '';
+    const L = [['ing', 'Ingresos netos', 1], ['cv', 'Costos variables directos', -1], ['bon', 'Bonificaciones e impuestos', -1]]
+      .concat(C.LINEAS_FIJAS.map(([k, t]) => [k, t, -1, 'det'])).concat([['fijos', 'Gastos fijos de sede', -1, 'sub'], ['pau', 'Pauta y mercadeo', -1], ['corp', 'Gasto corporativo asignado', -1], ['fin', 'Gastos financieros', -1], ['gastos', 'Total gastos de operación', -1, 'sub'], ['uai', 'Utilidad de gestión', 1, 'tot']]);
+    const solo = new Set(['ing', 'cv', 'bon', 'uai']);
+    const rows = L.filter(([k]) => !(B.promedio && X && solo.has(k))).map(([k, t, sg, cls]) => {
+      const b = B[k], r = X ? X[k] : null;
+      if (!X) return '<tr class="' + (cls || '') + '"><td>' + t + '</td><td>' + fM(b) + '</td><td>' + fP(B.ing ? b / B.ing : null) + '</td></tr>';
+      const d = r - b, ej = b ? r / Math.abs(b) : null, mal = sg > 0 ? d < 0 : d > 0, sig = Math.abs(d) > Math.abs(b) * 0.02 && Math.abs(d) > 1e6;
+      return '<tr class="' + (cls || '') + '"><td>' + t + '</td><td>' + fM(b) + '</td><td>' + fM(r) + '</td><td>' + (k === 'uai' ? '—' : fP(ej)) + '</td><td class="' + (sig ? (mal ? 'neg' : 'pos') : '') + '">' + (d >= 0 ? '+' : '') + fM(d) + '</td></tr>';
+    }).join('');
+    const head = X ? '<tr><th>Concepto</th><th>Presupuesto</th><th>Real</th><th>Ejecución</th><th>Desviación</th></tr>' : '<tr><th>Concepto</th><th>Presupuesto</th><th>% ventas</th></tr>';
+    let txt;
+    if (X) {
+      const dg = X.gastos - B.gastos, df = X.fijos - B.fijos;
+      const peor = C.LINEAS_FIJAS.concat([['pau', 'pauta'], ['corp', 'corporativo']]).map(([k, t]) => ({ t: t.toLowerCase(), d: X[k] - B[k] })).sort((a, b) => b.d - a.d)[0];
+      txt = 'En ' + C.keyLabel(S.mes) + ' ' + esc(sedeTxt()) + ' ejecutó <b>' + fM(X.gastos) + '</b> en gastos de operación frente a un presupuesto de ' + fM(B.gastos) + ' (' + fP(X.gastos / B.gastos) + ' de ejecución, ' + (dg >= 0 ? fM(dg) + ' por encima' : fM(-dg) + ' por debajo') + '). ' +
+        'Los gastos fijos de sede quedaron en ' + fM(X.fijos) + ' contra ' + fM(B.fijos) + ' presupuestados' + (peor.d > 0 ? ', y el mayor sobrecosto está en ' + esc(peor.t) + ' (+' + fM(peor.d) + ')' : '') + '. ' +
+        (B.promedio ? 'Como el presupuesto vigente es de 2027, en este mes se compara solo el gasto: los fijos contra el presupuesto mensual de cada sede y la pauta, el corporativo y los financieros contra el promedio mensual de 2027. Ingresos y utilidad se comparan desde enero de 2027.' : 'Los ingresos llegaron a ' + fP(X.ing / B.ing) + ' de la meta (' + fM(X.ing) + ' de ' + fM(B.ing) + ') y la utilidad de gestión fue ' + fM(X.uai) + ' contra ' + fM(B.uai) + ' presupuestados.');
+    } else {
+      txt = 'Aún no hay informe real de ' + C.keyLabel(S.mes) + '. El presupuesto vigente para ' + esc(sedeTxt()) + ' es de ' + fM(B.gastos) + ' en gastos de operación (' + fM(B.fijos) + ' fijos de sede y ' + fM(B.pau) + ' de pauta) con una meta de ingresos de ' + fM(B.ing) + '.';
+    }
+    let porSede = '';
+    if (X && S.sede === 'Todas') {
+      const fs = C.NOMBRES_SEDES.map(s => ({ s, b: C.presupuestoMes(S.ds, S.mes, s), r: C.real(S.ds, S.mes, s) })).filter(x => x.r);
+      fs.sort((a, b) => (b.r.fijos / b.b.fijos) - (a.r.fijos / a.b.fijos));
+      porSede = '<div class="card" style="padding:0;margin-top:20px"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Fijos presup.</th><th>Fijos real</th><th>Ejec. fijos</th><th>Arriendo presup.</th><th>Arriendo real</th><th>Pauta presup.</th><th>Pauta real</th><th>Ejec. pauta</th>' + (B.promedio ? '' : '<th>Utilidad presup.</th><th>Utilidad real</th>') + '</tr>' +
+        fs.map(x => { const ef = x.r.fijos / x.b.fijos, ep = x.b.pau ? x.r.pau / x.b.pau : null; return '<tr class="click" data-sede="' + esc(x.s) + '"><td>' + esc(x.s) + '</td><td>' + fM(x.b.fijos) + '</td><td>' + fM(x.r.fijos) + '</td><td class="' + (ef > 1.05 ? 'neg' : ef < 0.95 ? 'pos' : '') + '">' + fP(ef) + '</td><td>' + fM(x.b.arriendo) + '</td><td>' + fM(x.r.arriendo) + '</td><td>' + fM(x.b.pau) + '</td><td>' + fM(x.r.pau) + '</td><td class="' + (ep > 1.05 ? 'neg' : ep < 0.95 ? 'pos' : '') + '">' + fP(ep) + '</td>' + (B.promedio ? '' : '<td class="' + (x.b.uai < 0 ? 'neg' : '') + '">' + fM(x.b.uai) + '</td><td class="' + (x.r.uai < 0 ? 'neg' : '') + '">' + fM(x.r.uai) + '</td>') + '</tr>'; }).join('') + '</table></div></div>' +
+        '<p class="note" style="color:#6B7C93">Una ejecución muy baja en arriendo (Pereira Centro, Pereira Batallón, Cali Tequendama) indica que el arriendo del mes no quedó causado en la sede en el informe a socios; el presupuesto usa el arriendo corregido del plan. Barrancabermeja ya tiene en su presupuesto los recortes acordados, por eso su ejecución de septiembre supera el 100%.</p>';
+    }
+    return '<section class="section" id="s-pre"><p class="eyebrow">' + num() + ' — Presupuesto vs ejecución</p><h2>Presupuesto de gastos y ejecución real · ' + nombreMes(S.mes) + '</h2><div class="divider"></div>' +
+      '<p class="lead">El presupuesto vigente sale de los parámetros: el presupuesto mensual de fijos de cada sede, la pauta según inscritos y costo de adquisición, y las decisiones del 19 de noviembre. Se edita en Parámetros.</p>' +
+      '<div class="grid g-side"><div class="card" style="padding:0"><div class="tw"><table class="t">' + head + rows + '</table></div></div><div class="insight"><h4>Lectura</h4><p>' + txt + '</p></div></div>' + porSede + '</section>';
+  }
+
+  // ------------------------------------------------------------ sedes nuevas e inversión
+  function secNuevas() {
+    if (!S.ds.params) return '';
+    const G = S.ds.params.generales, P = S.ds.params.sedes;
+    const lista = C.NOMBRES_SEDES.filter(s => (P[s].nueva || P[s].evaluar) && (S.sede === 'Todas' || S.sede === s));
+    const reales = C.mesesReales(S.ds);
+    const filas = lista.map(s => {
+      const p = P[s], e = C.evaluarInversion(S.ds, s), cap = C.capacidad(S.ds, s), meses = C.mesesDesde(p.apertura, G.corteOperativo);
+      const perdReal = reales.filter(k => { const r = C.real(S.ds, k, s); return r && r.uai < 0; }).length;
+      let est, cls;
+      if (e.uaiAnual >= 0 && e.vpn >= 0) { est = 'Rentable: supera el ' + fP(G.tasaDescuento) + ' del CDT'; cls = 'green'; }
+      else if (p.nueva && meses != null && meses < G.plazoMaxPerdida) { est = 'En maduración (' + meses + ' de ' + G.plazoMaxPerdida + ' meses de plazo)'; cls = 'blue'; }
+      else if (e.uaiAnual >= 0) { est = 'Utilidad positiva, no alcanza el ' + fP(G.tasaDescuento) + ' del CDT'; cls = 'blue'; }
+      else { est = 'En pérdida' + (meses != null ? ' con ' + meses + ' meses' : '') + ': decidir reestructurar o cerrar'; cls = 'red'; }
+      return { s, p, e, cap, meses, perdReal, est, cls };
+    });
+    const rows = filas.map(x => '<tr class="click" data-sede="' + esc(x.s) + '"><td><b>' + esc(x.s) + '</b>' + (x.p.apertura ? '<div class="mini">Apertura ' + esc(C.keyLabel(x.p.apertura, true)) + ' · ' + x.meses + ' meses</div>' : '<div class="mini">Sede existente</div>') + '<div style="margin-top:4px"><span class="tag ' + x.cls + '">' + esc(x.est) + '</span></div></td><td>' + fP(x.cap.ocupFranjas) + '</td><td>' + (x.e.total ? fM(x.e.total) + '<div class="mini">' + fM(x.e.inversion) + ' + ' + fM(x.e.capTrabajo) + ' cap. trabajo</div>' : '—') + '</td><td class="' + (x.e.uaiAnual < 0 ? 'neg' : '') + '">' + fM(x.e.uaiAnual) + '</td><td class="' + (x.e.uaiPleno < 0 ? 'neg' : '') + '">' + fM(x.e.uaiPleno) + '</td><td>' + x.e.mesesNeg + '</td><td>' + (!x.e.total ? '—' : x.e.payback ? x.e.payback + ' meses' : 'No recupera') + '</td><td class="' + (x.e.vpn < 0 ? 'neg' : 'pos') + '">' + fM(x.e.vpn) + '</td><td>' + (x.e.tir == null ? '—' : fP(x.e.tir)) + '</td></tr>').join('');
+    // criterio de expansión para todas las sedes
+    const aptas = C.NOMBRES_SEDES.map(s => ({ s, c: C.capacidad(S.ds, s), m: C.mesesDesde(P[s].apertura, G.corteOperativo) })).filter(x => x.c.ocupFranjas >= G.ocupExpansion);
+    const expTxt = aptas.length ? aptas.map(x => esc(x.s) + ' (' + fP(x.c.ocupFranjas) + (x.m != null && x.m < G.mesesMaduracion ? ', lleva ' + x.m + ' meses: aún no cumple la maduración' : ', cumple') + ')').join('; ') : 'ninguna sede';
+    const capT = filas.filter(x => x.p.nueva).reduce((a, x) => a + x.e.capTrabajo, 0);
+    return '<section class="section" id="s-nue"><p class="eyebrow">' + num() + ' — Sedes nuevas e inversión</p><h2>Inversión inicial, capital de trabajo y retorno</h2><div class="divider"></div>' +
+      '<div class="insight" style="margin-bottom:20px"><h4>Reglas acordadas el 19 de noviembre</h4><p>La apertura de una sede se registra como <b>inversión</b>, no como gasto de operación, para no castigar la utilidad de la empresa. La inversión incluye montaje, pauta de lanzamiento y un capital de trabajo de <b>' + G.mesesCapitalTrabajo + ' meses de gastos fijos</b> para sostener la sede mientras llega al punto de equilibrio; en las sedes nuevas de esta tabla suma ' + fM(capT) + '. ' +
+      'Una sede en pérdida tiene un plazo máximo de <b>' + G.plazoMaxPerdida + ' meses</b> antes de decidir si se reestructura o se cierra. Solo se abre otra sede en la misma zona cuando la existente llega a ' + fP(G.ocupExpansion) + ' de ocupación y tiene ' + G.mesesMaduracion + ' meses de maduración. Hoy superan ese nivel de ocupación: ' + expTxt + '.</p>' +
+      '<p>Cada sede se evalúa contra un CDT de ' + fP(G.tasaDescuento) + ' efectivo anual, con flujos mensuales a ' + G.horizonteMeses + ' meses: el primer año sale del presupuesto vigente 2027 y los siguientes de la sede con la ocupación objetivo ya alcanzada; el capital de trabajo se recupera al final.</p></div>' +
+      '<div class="card" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Ocupación hoy</th><th>Inversión total</th><th>Utilidad 2027</th><th>Utilidad año pleno</th><th>Meses en pérdida 2027</th><th>Recuperación</th><th>VPN ' + fP(G.tasaDescuento) + '</th><th>TIR anual</th></tr>' + (rows || '<tr><td colspan="9">No hay sedes marcadas como nuevas o para evaluar.</td></tr>') + '</table></div></div>' +
+      '<p class="note" style="color:#6B7C93">La inversión inicial se toma de Parámetros (referencia de la reunión: $100M por sede nueva); reemplácela por el valor real de montaje de cada sede. Barrancabermeja y Sincelejo se evalúan como sedes existentes, sin inversión inicial ni capital de trabajo: su VPN es el valor de seguir operando con el presupuesto vigente.</p></section>';
+  }
+
+  // ------------------------------------------------------------ decisiones de la reunión
+  function secDecisiones() {
+    if (!S.ds.params) return '';
+    const ks = C.mesesPlan(S.ds), P = S.ds.params.sedes, G = S.ds.params.generales;
+    const A = (e, s) => C.acumular(k => C.plan(S.ds, e, k, s), ks);
+    const d = s => { const b = A('base', s), v = A('vigente', s); return 'pasa de ' + fM(b.uai) + ' a <b>' + fM(v.uai) + '</b> de utilidad en 2027'; };
+    const bT = A('base', 'Todas'), vT = A('vigente', 'Todas');
+    const items = [
+      ['Incremento de precio en las cuotas', 'La inscripción se mantiene en $199.000 y el aumento va en las cuotas mensuales: unos $50.000 sobre un curso de $1.200.000, un incremento efectivo de ' + fP2(G.incPrecio) + ' en lugar de ' + fP2(G.incPrecioBase) + '. El área de gestión puede usar descuentos de $10.000 por cuota para retener estudiantes.'],
+      ['Barrancabermeja: reestructurar fijos', 'Se entregan 2 de 4 salones, se paga media renta y medios servicios y sale una persona de la nómina. Con los mismos grupos en 2 salones la ocupación pasa de 36% a ' + fP(P['Barrancabermeja'].ocupPlan) + '. La sede ' + d('Barrancabermeja') + '; sigue en pérdida por la pauta (19% de las ventas contra 12% de la empresa).'],
+      ['Sincelejo: sin kit y sin aumento', 'Se elimina el kit y se mantiene el precio para subir la ocupación de 30% a ' + fP(P['Sincelejo'].ocupPlan) + '. La sede ' + d('Sincelejo') + '.'],
+      ['Venecia y Zipaquirá a 60% de ocupación', 'Venecia ' + d('Venecia') + ' con 2 salones (el arriendo pesa sobre solo 2 de 6 salones posibles); Zipaquirá ' + d('Zipaquirá') + '. Jefferson Gómez revisa habilitar 3 salones más en Venecia.'],
+      ['Capital de trabajo y criterios de apertura', 'Cada sede nueva lleva en su inversión inicial ' + G.mesesCapitalTrabajo + ' meses de gastos fijos como capital de trabajo, y solo se abre otra sede en la zona con ' + fP(G.ocupExpansion) + ' de ocupación y ' + G.mesesMaduracion + ' meses de maduración. Detalle en Sedes nuevas e inversión.'],
+    ];
+    const cards = items.map(([t, x], i) => '<div class="dec"><span class="dec-n">' + (i + 1) + '</span><div><b>' + t + '</b><p>' + x + '</p></div></div>').join('');
+    const estados = ['Pendiente', 'En curso', 'En tablero', 'Hecho'];
+    const tareas = (S.ds.params.tareas || []).map((t, i) => '<tr><td style="text-align:left;white-space:normal">' + esc(t.tarea) + '</td><td style="text-align:left">' + esc(t.resp) + '</td><td><select class="tarea-est" data-i="' + i + '">' + estados.map(e => '<option' + (e === t.estado ? ' selected' : '') + '>' + e + '</option>').join('') + '</select></td></tr>').join('');
+    const crit = C.NOMBRES_SEDES.filter(s => S.ds.plan.criticas[s] && S.ds.plan.criticas[s].critica).map(s => ({ s, c: S.ds.plan.criticas[s], b: A('base', s).uai, a: A('ajustado', s).uai, v: A('vigente', s).uai })).sort((x, y) => x.b - y.b);
+    const critRows = crit.map(x => '<tr class="click" data-sede="' + esc(x.s) + '"><td><b>' + esc(x.s) + '</b></td><td>' + fP(x.c.ocupBase) + ' → ' + fP(x.c.ocupAj) + '</td><td class="neg">' + fM(x.b) + '</td><td class="' + (x.a < 0 ? 'neg' : 'pos') + '">' + fM(x.a) + '</td><td class="' + (x.v < 0 ? 'neg' : 'pos') + '">' + fM(x.v) + '</td><td style="text-align:left;white-space:normal;min-width:300px;font-size:13px">' + esc(P[x.s].nota || x.c.accion || '') + '</td></tr>').join('');
+    return '<section class="section" id="s-dec"><p class="eyebrow">' + num() + ' — Decisiones del 19 de noviembre</p><h2>Qué se acordó y cuánto mueve el resultado</h2><div class="divider"></div>' +
+      '<p class="lead">Con las decisiones de la reunión, el presupuesto vigente 2027 queda en <b>' + fM(vT.ing) + '</b> de ingresos y <b>' + fM(vT.uai) + '</b> de utilidad de gestión (' + fP(vT.uaiP) + '), frente a ' + fM(bT.uai) + ' (' + fP(bT.uaiP) + ') del plan base. El margen de seguridad pasa de ' + fP(bT.ms) + ' a ' + fP(vT.ms) + '. Sigue lejos de la meta de ' + fP2(S.ds.plan.meta) + ': falta decidir Suba, Cali Norte, Itagüí y las demás sedes críticas.</p>' +
+      '<div class="grid g2"><div class="card"><h3>Acuerdos</h3>' + cards + '</div><div class="card"><h3>Próximos pasos</h3><div class="tw"><table class="t"><tr><th>Tarea</th><th style="text-align:left">Responsable</th><th>Estado</th></tr>' + tareas + '</table></div><p class="note">El estado se guarda con los parámetros (Parámetros › Guardar).</p></div></div>' +
+      '<h3 style="font-family:var(--sora);margin:28px 0 12px">Sedes críticas: plan base, ajustado y vigente</h3><div class="card" style="padding:0"><div class="tw"><table class="t"><tr><th>Sede</th><th>Ocupación base → ajustada</th><th>Utilidad base</th><th>Utilidad ajustada</th><th>Utilidad vigente</th><th style="text-align:left">Decisión o acción</th></tr>' + critRows + '</table></div></div></section>';
+  }
+
+  // ------------------------------------------------------------ parámetros (back editable)
+  const parseNum = v => { let s = String(v == null ? '' : v).trim().replace(/[$\s%]/g, ''); if (!s) return null; if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.'); else if ((s.match(/\./g) || []).length > 1 || /\.\d{3}$/.test(s)) s = s.replace(/\./g, ''); const n = parseFloat(s); return isFinite(n) ? n : null; };
+  const fmtIn = (v, t) => v == null || v === '' ? '' : t === 'pct' || t === 'pctOpt' ? nf1.format(v * 100).replace(/,0$/, '') : t === 'pct2' ? new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 }).format(v * 100) : t === 'pesos' ? nf0.format(Math.round(v)) : String(v);
+  function campo(lab, path, val, t, ayuda) {
+    if (t === 'bool') return '<label class="pf pf-check"><input type="checkbox" data-p="' + path + '" data-t="bool"' + (val ? ' checked' : '') + '> ' + lab + '</label>';
+    if (t === 'textarea') return '<label class="pf pf-wide"><span>' + lab + '</span><textarea data-p="' + path + '" data-t="text" rows="3">' + esc(val || '') + '</textarea></label>';
+    return '<label class="pf"><span>' + lab + (t && t.startsWith('pct') ? ' (%)' : t === 'pesos' ? ' ($)' : '') + '</span><input type="text" inputmode="decimal" data-p="' + path + '" data-t="' + (t || 'num') + '" value="' + esc(fmtIn(val, t)) + '"' + (t === 'pctOpt' ? ' placeholder="general"' : '') + '>' + (ayuda ? '<small>' + ayuda + '</small>' : '') + '</label>';
+  }
+  function leerCampos(root) {
+    const errores = [];
+    root.querySelectorAll('[data-p]').forEach(el => {
+      const [scope, ...path] = el.dataset.p.split('.'), t = el.dataset.t;
+      let obj = scope === 'g' ? S.ds.params.generales : S.ds.params.sedes[S.psede];
+      for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]] = obj[path[i]] || {};
+      const k = path[path.length - 1];
+      if (t === 'bool') { obj[k] = el.checked; return; }
+      if (t === 'text' || t === 'mes') { const v = el.value.trim(); if (t === 'mes' && v && !/^\d{4}-\d{2}$/.test(v)) errores.push('Apertura debe tener formato AAAA-MM'); obj[k] = v || (t === 'mes' ? null : ''); return; }
+      let v = parseNum(el.value);
+      if (v == null) { if (t === 'pctOpt') { obj[k] = null; return; } errores.push('Valor inválido en ' + el.closest('label').querySelector('span').textContent); return; }
+      if (t === 'pct' || t === 'pctOpt' || t === 'pct2') v = v / 100;
+      if (t === 'int') v = Math.round(v);
+      if (v < 0 && t !== 'pctOpt') { errores.push('No se permiten negativos en ' + el.closest('label').querySelector('span').textContent); return; }
+      obj[k] = v;
+    });
+    const p = S.ds.params.sedes[S.psede];
+    if (p.salonesPlan > p.salonesPosibles) errores.push('Los salones del plan no pueden superar los salones posibles');
+    if (p.ocupPlan > 1) errores.push('La ocupación plan no puede superar 100%');
+    return errores;
+  }
+  function renderParams() {
+    const PR = S.ds.params, G = PR.generales; S.psede = S.psede || (S.sede !== 'Todas' ? S.sede : C.NOMBRES_SEDES[0]);
+    const s = S.psede, p = PR.sedes[s], ks = C.mesesPlan(S.ds);
+    const A = (e, x) => C.acumular(k => C.plan(S.ds, e, k, x), ks);
+    const vb = A('base', s), vv = A('vigente', s), cap = C.capacidad(S.ds, s);
+    const opt = C.NOMBRES_SEDES.map(n => '<option' + (n === s ? ' selected' : '') + '>' + esc(n) + '</option>').join('');
+    const pp = p.presupuestoPlan || {};
+    const cursos = '<table class="t mini-t"><tr><th>Curso</th><th>Grupos activos</th><th>Estudiantes</th><th>Programados</th></tr>' + C.CURSOS.map(([c, n]) => { const x = p.cursos[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="s.cursos.' + c + '.grupos" data-t="int" value="' + (x.grupos || 0) + '"></td><td><input data-p="s.cursos.' + c + '.estudiantes" data-t="int" value="' + (x.estudiantes || 0) + '"></td><td><input data-p="s.cursos.' + c + '.programados" data-t="int" value="' + (x.programados || 0) + '"></td></tr>'; }).join('') + '</table>';
+    const resumen = C.NOMBRES_SEDES.map(n => { const q = PR.sedes[n], v = A('vigente', n), b = A('base', n), fx = C.LINEAS_FIJAS.reduce((a, [k]) => a + (+q.presupuesto[k] || 0), 0); return '<tr class="click' + (n === s ? ' sel' : '') + '" data-psede="' + esc(n) + '"><td>' + esc(n) + '</td><td>' + q.salones + ' / ' + q.salonesPlan + ' / ' + q.salonesPosibles + '</td><td>' + q.gruposActivos + '</td><td>' + fN(q.estudiantesActivos) + '</td><td>' + fP(q.ocupPlan) + '</td><td>' + (q.kit ? 'Sí' : 'No') + '</td><td>' + fP2(q.incPrecio == null ? G.incPrecio : q.incPrecio) + '</td><td>' + fM(fx) + '</td><td class="' + (b.uai < 0 ? 'neg' : '') + '">' + fM(b.uai) + '</td><td class="' + (v.uai < 0 ? 'neg' : 'pos') + '">' + fM(v.uai) + '</td></tr>'; }).join('');
+    const T = A('vigente', 'Todas');
+    $('#app').innerHTML = '<header class="topbar"><div class="topbar-in">' + logo(false) + '<div class="client"><b>Eleganza Academia</b><br>Parámetros del tablero</div><div class="filters"><button class="btn ghost small" id="pvolver">Volver al tablero</button><button class="btn small" id="pguardar">Guardar y descargar dataset.json</button></div></div></header>' +
+      '<main>' + (S.dirty ? '<div class="aviso">Hay cambios aplicados en esta sesión que todavía no están en GitHub. Pulse <b>Guardar y descargar</b> y suba el dataset.json a la carpeta data del repositorio.</div>' : '') +
+      '<section class="section"><p class="eyebrow">Base de parámetros</p><h2>Capacidad, cursos y presupuesto por sede</h2><div class="divider"></div>' +
+      '<p class="lead">Todo el tablero se recalcula con estos valores: capacidad y ocupación, presupuesto vigente, ejecución, sedes nuevas y decisiones. Los cambios se aplican de inmediato en esta sesión; para que todos los vean, guarde y suba el dataset.json a GitHub. Presupuesto vigente 2027 de la empresa con los parámetros actuales: ' + fM(T.ing) + ' de ingresos y ' + fM(T.uai) + ' de utilidad (' + fP(T.uaiP) + ').</p>' +
+      '<div class="grid g-side"><div class="card" id="pform"><div class="pf-head"><div class="field"><label>Sede</label><select id="psel">' + opt + '</select></div>' +
+      '<div class="pf-kpis"><span>Utilidad 2027 base <b class="' + (vb.uai < 0 ? 'down' : '') + '">' + fM(vb.uai) + '</b></span><span>Vigente <b class="' + (vv.uai < 0 ? 'down' : 'up') + '">' + fM(vv.uai) + '</b></span><span>Ocupación hoy <b>' + fP(cap.ocupFranjas) + '</b></span><span>Factor de volumen <b>' + nf1.format(S.ds.plan.plan.vigente[s].f) + 'x</b></span></div></div>' +
+      '<h4>Capacidad actual</h4><div class="pf-grid">' + campo('Salones habilitados', 's.salones', p.salones, 'int') + campo('Salones posibles', 's.salonesPosibles', p.salonesPosibles, 'int', 'Espacio disponible para habilitar') + campo('Grupos activos', 's.gruposActivos', p.gruposActivos, 'int') + campo('Estudiantes activos', 's.estudiantesActivos', p.estudiantesActivos, 'int') + campo('Deserción histórica', 's.desercion', p.desercion, 'pct') + '</div>' +
+      '<h4>Plan 2027 de la sede</h4><div class="pf-grid">' + campo('Salones en 2027', 's.salonesPlan', p.salonesPlan, 'int') + campo('Ocupación objetivo 2027', 's.ocupPlan', p.ocupPlan, 'pct', 'Plan base: ' + fP(S.ds.plan.capacidad[s].ocup2027)) + campo('CAC 2027', 's.cac', p.cac, 'pesos', 'Plan: ' + fPesos(p.cacPlan)) + campo('Incremento de precio', 's.incPrecio', p.incPrecio, 'pctOpt', 'Vacío = general (' + fP2(G.incPrecio) + ')') + campo('Entrega kit', 's.kit', p.kit, 'bool') + '</div>' +
+      '<h4>Presupuesto mensual de gastos fijos 2027</h4><div class="pf-grid">' + C.LINEAS_FIJAS.map(([k, t]) => campo(t, 's.presupuesto.' + k, p.presupuesto[k], 'pesos', 'Plan: ' + fPesos(pp[k]))).join('') + '</div>' +
+      '<h4>Cursos asignados</h4>' + cursos +
+      '<h4>Inversión y apertura</h4><div class="pf-grid">' + campo('Apertura (AAAA-MM)', 's.apertura', p.apertura, 'mes') + campo('Inversión inicial', 's.inversion', p.inversion, 'pesos', 'Sin capital de trabajo') + campo('Sede nueva', 's.nueva', p.nueva, 'bool') + campo('Evaluar como inversión', 's.evaluar', p.evaluar, 'bool') + '</div>' +
+      '<div class="pf-grid">' + campo('Nota o decisión', 's.nota', p.nota, 'textarea') + '</div>' +
+      '<div class="row-actions"><button class="btn ghost" id="preset">Restablecer sede a valores iniciales</button><button class="btn" id="paplicar">Aplicar cambios</button></div><div id="perr"></div></div>' +
+      '<div><div class="card" id="pgen"><h3>Parámetros generales</h3><div class="pf-grid one">' + campo('Franjas por salón', 'g.franjasSalon', G.franjasSalon, 'int') + campo('Cupo por grupo', 'g.cupo', G.cupo, 'int') + campo('Tope de ocupación', 'g.topeOcupacion', G.topeOcupacion, 'pct') +
+      campo('Incremento de precio 2027', 'g.incPrecio', G.incPrecio, 'pct2', 'Efectivo, aplicado en cuotas') + campo('Incremento del plan base', 'g.incPrecioBase', G.incPrecioBase, 'pct2') + campo('Meses de rampa', 'g.mesesRampa', G.mesesRampa, 'int', 'Meses para que los activos lleguen a la nueva ocupación') +
+      campo('Tasa de oportunidad (CDT)', 'g.tasaDescuento', G.tasaDescuento, 'pct') + campo('Meses de capital de trabajo', 'g.mesesCapitalTrabajo', G.mesesCapitalTrabajo, 'int') + campo('Ocupación para expandir', 'g.ocupExpansion', G.ocupExpansion, 'pct') + campo('Meses de maduración', 'g.mesesMaduracion', G.mesesMaduracion, 'int') +
+      campo('Plazo máximo en pérdida (meses)', 'g.plazoMaxPerdida', G.plazoMaxPerdida, 'int') + campo('Horizonte de evaluación (meses)', 'g.horizonteMeses', G.horizonteMeses, 'int') + campo('Inversión de referencia sede nueva', 'g.inversionNuevaSede', G.inversionNuevaSede, 'pesos') + campo('Corte de datos operativos', 'g.corteOperativo', G.corteOperativo, 'mes') + '</div>' +
+      '<div class="row-actions"><button class="btn" id="pgaplicar">Aplicar generales</button></div><div id="pgerr"></div></div></div></div></section>' +
+      '<section class="section"><p class="eyebrow">Resumen</p><h2>Parámetros de las 24 sedes</h2><div class="divider"></div><div class="card" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Salones hoy / 2027 / posibles</th><th>Grupos</th><th>Estudiantes</th><th>Ocupación 2027</th><th>Kit</th><th>Incremento</th><th>Fijos/mes</th><th>Utilidad base</th><th>Utilidad vigente</th></tr>' + resumen + '</table></div></div></section></main>' + footer();
+    $('#pvolver').onclick = () => { render(); window.scrollTo(0, 0); };
+    $('#psel').onchange = e => { S.psede = e.target.value; renderParams(); };
+    document.querySelectorAll('tr[data-psede]').forEach(tr => tr.onclick = () => { S.psede = tr.dataset.psede; renderParams(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    const aplicar = (root, errEl) => {
+      const errs = leerCampos(root);
+      if (errs.length) { $(errEl).innerHTML = '<p class="down">' + errs.map(esc).join('<br>') + '</p>'; return; }
+      C.recalcular(S.ds); S.dirty = true; renderParams(); toast('Cambios aplicados. Guarde y suba el dataset.json para publicarlos.', 5000);
+    };
+    $('#paplicar').onclick = () => aplicar($('#pform'), '#perr');
+    $('#pgaplicar').onclick = () => aplicar($('#pgen'), '#pgerr');
+    $('#preset').onclick = () => {
+      const ini = S.ds.paramsInicial && S.ds.paramsInicial.sedes[s];
+      if (!ini) { toast('No hay valores iniciales guardados para esta sede.'); return; }
+      S.ds.params.sedes[s] = JSON.parse(JSON.stringify(ini)); C.recalcular(S.ds); S.dirty = true; renderParams(); toast('Se restablecieron los valores iniciales de ' + s + '.');
+    };
+    $('#pguardar').onclick = guardarParams;
+  }
+  async function guardarParams() {
+    await guardar(await C.encryptDataset(S.ds, S.key, S.salt));
+    S.dirty = false;
+    const m = modal('<h3>Parámetros guardados</h3><p class="muted">Se descargó <b>dataset.json</b> cifrado con los parámetros actuales. Para que todos lo vean en el link:</p>' + pasosPublicar + '<div class="row-actions"><button class="btn" id="mok">Entendido</button></div>');
+    $('#mok', m).onclick = () => m.remove();
+    if ($('.aviso')) $('.aviso').remove();
   }
 
   function footer() {

@@ -224,14 +224,15 @@
     return completar(base);
   }
 
-  const ESCENARIOS = { base: 'Plan base', ajustado: 'Plan ajustado', sinkit: 'Sin kit y sin aumento' };
+  const ESCENARIOS = { vigente: 'Presupuesto vigente', base: 'Plan base', ajustado: 'Plan ajustado', sinkit: 'Sin kit y sin aumento' };
   /** Plan de un mes (clave AAAA-MM del año del plan) para una sede o 'Todas'. */
   function plan(ds, esc, k, sede) {
     const PL = ds.plan; if (!PL) return null;
     const { y, m } = keyParts(k); if (y !== PL.anio) return null;
     const i = m - 1;
     const uno = s => {
-      const d = PL.plan[esc][s]; const fx = PL.fijos[s];
+      const d = PL.plan[esc] && PL.plan[esc][s]; if (!d) return null;
+      const fx = esc === 'vigente' && ds.params ? ds.params.sedes[s].presupuesto : PL.fijos[s];
       const fijBreak = ['personal', 'arriendo', 'servicios', 'mantenimiento', 'otros', 'iva'].reduce((a, kk) => a + fx[kk], 0);
       const ajuste = d.fij[i] - fijBreak; // diferencia de redondeo
       return {
@@ -240,8 +241,8 @@
         nue: d.nue[i], act: d.act[i], ga: d.ga[i]
       };
     };
-    const base = sede === 'Todas' ? sumar(PL.sedes.map(uno)) : uno(sede);
-    return completar(base);
+    const base = sede === 'Todas' ? sumar(PL.sedes.map(uno).filter(Boolean)) : uno(sede);
+    return base ? completar(base) : null;
   }
   /** Suma de varios meses (real o plan). */
   function acumular(fn, keys) {
@@ -257,6 +258,119 @@
   function porSede(ds, k, esc) {
     return NOMBRES_SEDES.map(s => ({ sede: s, real: real(ds, k, s), plan: plan(ds, esc, k, s) }));
   }
+
+
+  // ------------------------------------------------------------------ 4b. parámetros y presupuesto vigente
+  const CURSOS = [['MAN', 'Manicure'], ['CEJ', 'Cejas y pestañas'], ['BAR', 'Barbería'], ['MAQ', 'Maquillaje'], ['EST', 'Estilismo'], ['PEI', 'Peinados'], ['MAS', 'Masajes']];
+  const LINEAS_FIJAS = [['personal', 'Personal de sede'], ['arriendo', 'Arriendo'], ['servicios', 'Servicios públicos e internet'], ['mantenimiento', 'Mantenimiento y adecuaciones'], ['otros', 'Otros gastos de sede'], ['iva', 'Provisión IVA']];
+
+  /**
+   * Presupuesto vigente: plan 2027 recalculado con los parámetros editables de cada sede.
+   *   volumen  f   = (salones plan × franjas por salón × ocupación plan) / (franjas base × ocupación base del plan)
+   *   precio       = ingreso sin aumento + (ingreso plan base − ingreso sin aumento) × incremento / incremento del plan base
+   *   kit          = costo variable del plan base (con kit) o del escenario sin kit
+   *   inscritos nuevos y pauta se multiplican por f desde enero; ingresos, costos variables, estudiantes activos
+   *   y grupos llegan a f en forma gradual durante los primeros meses (mesesRampa = duración promedio del curso)
+   *   pauta        = pauta del plan × f × CAC parámetro / CAC del plan
+   *   fijos        = presupuesto mensual de la sede (parámetro); corporativo y financieros = plan base
+   * Con los parámetros iniciales (sin cambios) reproduce exactamente el plan base.
+   */
+  function vigenteSede(PL, G, p, s) {
+    const b = PL.plan.base[s], k = PL.plan.sinkit[s], cap = PL.capacidad[s];
+    const capBase = (cap.franjas || 1) * (cap.ocup2027 || 0);
+    const f = capBase > 0 ? (p.salonesPlan * G.franjasSalon * p.ocupPlan) / capBase : 0;
+    const inc = p.incPrecio == null ? G.incPrecio : p.incPrecio;
+    const incR = G.incPrecioBase ? inc / G.incPrecioBase : 1;
+    const cacR = p.cacPlan ? (p.cac || p.cacPlan) / p.cacPlan : 1;
+    const fij = LINEAS_FIJAS.reduce((a, [kk]) => a + (+p.presupuesto[kk] || 0), 0);
+    const o = { ing: [], cv: [], bon: [], mc: [], fij: [], pau: [], con: [], corp: [], fin: [], uai: [], uaiPleno: [], nue: [], act: [], ga: [], f };
+    const rampa = Math.max(1, G.mesesRampa || 1);
+    for (let i = 0; i < 12; i++) {
+      // los inscritos nuevos (y su pauta) cambian desde enero; los estudiantes activos, y con ellos el recaudo,
+      // los docentes y los kits, se acumulan a medida que entran las cohortes (rampa = duración del curso)
+      const fa = 1 + (f - 1) * Math.min(1, (i + 1) / rampa);
+      const ing0 = k.ing[i] + (b.ing[i] - k.ing[i]) * incR;
+      const ing = ing0 * fa, cv = (p.kit ? b.cv[i] : k.cv[i]) * fa, bon = b.ing[i] ? b.bon[i] / b.ing[i] * ing : 0;
+      const pau = b.pau[i] * f * cacR, mc = ing - cv - bon, con = mc - fij - pau, uai = con - b.corp[i] - b.fin[i];
+      o.ing.push(ing); o.cv.push(cv); o.bon.push(bon); o.mc.push(mc); o.fij.push(fij); o.pau.push(pau); o.con.push(con);
+      o.corp.push(b.corp[i]); o.fin.push(b.fin[i]); o.uai.push(uai);
+      { const ingP = ing0 * f, cvP = (p.kit ? b.cv[i] : k.cv[i]) * f, bonP = b.ing[i] ? b.bon[i] / b.ing[i] * ingP : 0; o.uaiPleno.push(ingP - cvP - bonP - fij - pau - b.corp[i] - b.fin[i]); } o.nue.push(b.nue[i] * f); o.act.push(b.act[i] * fa); o.ga.push(b.ga[i] * fa);
+    }
+    return o;
+  }
+  function recalcular(ds) {
+    const PL = ds.plan; if (!PL || !ds.params) return ds;
+    const G = ds.params.generales; PL.plan.vigente = {};
+    for (const s of PL.sedes) PL.plan.vigente[s] = vigenteSede(PL, G, ds.params.sedes[s], s);
+    return ds;
+  }
+
+  /** Capacidad y ocupación operativa de una sede (o 'Todas') según parámetros. */
+  function capacidad(ds, sede) {
+    const G = ds.params.generales;
+    const uno = s => {
+      const p = ds.params.sedes[s];
+      const franjas = p.salones * G.franjasSalon, cupos = franjas * G.cupo;
+      const cursos = {}; let gc = 0, ec = 0, pc = 0;
+      for (const [c] of CURSOS) { const x = p.cursos[c] || { grupos: 0, estudiantes: 0, programados: 0 }; cursos[c] = Object.assign({}, x); gc += x.grupos; ec += x.estudiantes; pc += x.programados || 0; }
+      return {
+        salones: p.salones, salonesPlan: p.salonesPlan, salonesPosibles: p.salonesPosibles, franjas, cupos, franjasPosibles: p.salonesPosibles * G.franjasSalon,
+        grupos: p.gruposActivos, estudiantes: p.estudiantesActivos, cursos, gruposCursos: gc, estCursos: ec, programados: pc,
+        inscMes: p.inscMesHist, desercionPond: p.desercion * p.inscMesHist, cacPond: p.cac * p.inscMesHist, n: 1
+      };
+    };
+    const lista = sede === 'Todas' ? NOMBRES_SEDES.map(uno) : [uno(sede)];
+    const t = lista.reduce((a, x) => {
+      for (const kk of ['salones', 'salonesPlan', 'salonesPosibles', 'franjas', 'cupos', 'franjasPosibles', 'grupos', 'estudiantes', 'gruposCursos', 'estCursos', 'programados', 'inscMes', 'desercionPond', 'cacPond', 'n']) a[kk] = (a[kk] || 0) + x[kk];
+      for (const [c] of CURSOS) { a.cursos[c] = a.cursos[c] || { grupos: 0, estudiantes: 0, programados: 0 }; for (const z of ['grupos', 'estudiantes', 'programados']) a.cursos[c][z] += x.cursos[c][z] || 0; }
+      return a;
+    }, { cursos: {} });
+    t.ocupFranjas = t.franjas ? t.grupos / t.franjas : 0;
+    t.ocupCupos = t.cupos ? t.estudiantes / t.cupos : 0;
+    t.estPorGrupo = t.grupos ? t.estudiantes / t.grupos : 0;
+    t.libres = Math.max(0, t.franjas - t.grupos);
+    t.habilitables = Math.max(0, Math.floor(t.franjas * G.topeOcupacion) - t.grupos);
+    t.desercion = t.inscMes ? t.desercionPond / t.inscMes : 0;
+    t.cac = t.inscMes ? t.cacPond / t.inscMes : 0;
+    return t;
+  }
+
+  /** Presupuesto de gastos de un mes (vigente). En meses fuera del año del plan: fijos del parámetro y promedio mensual del resto. */
+  function presupuestoMes(ds, k, sede) {
+    const PL = ds.plan; if (!PL || !ds.params) return null;
+    const P = plan(ds, 'vigente', k, sede);
+    if (P) return Object.assign(P, { promedio: false });
+    const A = acumular(kk => plan(ds, 'vigente', kk, sede), mesesPlan(ds));
+    const o = {}; for (const [kk, v] of Object.entries(A)) if (typeof v === 'number') o[kk] = v / 12;
+    const sedes = sede === 'Todas' ? NOMBRES_SEDES : [sede];
+    for (const [kk] of LINEAS_FIJAS) o[kk] = sedes.reduce((a, s) => a + (+ds.params.sedes[s].presupuesto[kk] || 0), 0);
+    return Object.assign(completar(o), { promedio: true });
+  }
+
+  /** Evaluación financiera de una sede como inversión: flujos mensuales del presupuesto vigente. */
+  function evaluarInversion(ds, s) {
+    const G = ds.params.generales, p = ds.params.sedes[s], V = ds.plan.plan.vigente[s];
+    const fijMes = V.fij[0], capTrabajo = p.nueva ? fijMes * G.mesesCapitalTrabajo : 0, inversion = +p.inversion || 0; // sede existente: sin capital de trabajo nuevo
+    const H = G.horizonteMeses, tm = Math.pow(1 + G.tasaDescuento, 1 / 12) - 1;
+    const flujos = [-(inversion + capTrabajo)];
+    // año 1 = presupuesto vigente 2027 (con rampa); años siguientes = mismo calendario con la ocupación plena
+    for (let t = 1; t <= H; t++) flujos.push((t <= 12 ? V.uai[t - 1] : V.uaiPleno[(t - 1) % 12]) + (t === H ? capTrabajo : 0));
+    const vpn = r => flujos.reduce((a, x, t) => a + x / Math.pow(1 + r, t), 0);
+    let tir = null;
+    if (flujos[0] < 0 && flujos.slice(1).reduce((a, b) => a + b, 0) > -flujos[0]) {
+      let lo = -0.99, hi = 1;
+      for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2; if (vpn(mid) > 0) lo = mid; else hi = mid; }
+      tir = Math.pow(1 + (lo + hi) / 2, 12) - 1;
+    }
+    let acum = flujos[0], payback = null;
+    for (let t = 1; t <= H; t++) { acum += flujos[t]; if (payback == null && acum >= 0) payback = t; }
+    const uaiAnual = V.uai.reduce((a, b) => a + b, 0);
+    const mesesNeg = V.uai.filter(x => x < 0).length;
+    const primerPositivo = V.uai.findIndex(x => x >= 0);
+    const uaiPleno = V.uaiPleno.reduce((a, b) => a + b, 0);
+    return { inversion, capTrabajo, total: inversion + capTrabajo, fijMes, uaiAnual, uaiPleno, uaiMes: uaiAnual / 12, vpn: vpn(tm), tir, payback, mesesNeg, primerPositivo, flujos, horizonte: H, tasa: G.tasaDescuento };
+  }
+  function mesesDesde(k0, k1) { if (!k0) return null; const a = keyParts(k0), b = keyParts(k1); return (b.y - a.y) * 12 + (b.m - a.m); }
 
   // ------------------------------------------------------------------ 5. cifrado
   const subtle = () => (globalThis.crypto && globalThis.crypto.subtle) || null;
@@ -303,8 +417,8 @@
   async function newKey(pin) { const salt = randomBytes(16); const key = await deriveKey(pin, salt); return { key, salt }; }
 
   // ------------------------------------------------------------------ dataset
-  function datasetVacio(planData) {
-    return { empresa: 'Eleganza Academia · CEINDER S.A.S.', version: 1, sedes: NOMBRES_SEDES, plan: planData || null, reales: {}, cargas: [] };
+  function datasetVacio(planData, params) {
+    return { empresa: 'Eleganza Academia · CEINDER S.A.S.', version: 2, sedes: NOMBRES_SEDES, plan: planData || null, params: params || null, reales: {}, cargas: [] };
   }
   /** Incorpora un informe parseado (reemplaza el mismo mes). */
   function incorporar(ds, parsed, periodo, archivo) {
@@ -324,6 +438,7 @@
     clasificaCuenta, clasificaEspecial, periodoDeTexto, encontrarHoja, parseInforme,
     completar, sumar, real, plan, acumular, mesesReales, mesesPlan, porSede,
     deriveKey, newKey, encryptDataset, decryptDataset, b64e, b64d,
-    datasetVacio, incorporar
+    datasetVacio, incorporar,
+    CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, presupuestoMes, evaluarInversion, mesesDesde
   };
 });
