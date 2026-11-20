@@ -266,3 +266,26 @@ table.mini-t td { padding: 4px 8px; } table.mini-t input { padding: 5px 8px; tex
 .duo .dg { background: var(--df-ink); } .duo .di { background: var(--df-blue); }
 .cel { display: inline-block; min-width: 44px; padding: 3px 8px; border-radius: 4px; text-align: right; }
 .cursos-t td:first-child { min-width: 170px; max-width: 220px; }
+.dcell { width: 26%; min-width: 160px; }
+.dbar { position: relative; height: 12px; }
+.dbar::before { content: ''; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--df-ink); opacity: .5; }
+.dbar span { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.dbar span.p { left: 50%; background: var(--df-blue); } .dbar span.n { right: 50%; background: var(--df-danger); }
+/* tablas sin desplazamiento horizontal: encabezados en dos líneas, celdas compactas */
+table.t th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+table.t.compact td, table.t.compact th { padding: 7px 8px; font-size: 12.5px; }
+table.t.compact td:first-child { min-width: 0; }
+table.t.compact td:first-child, table.t.compact th:first-child { padding-left: 14px; }
+.plan-t td:first-child { min-width: 150px; white-space: nowrap; }
+.plan-t th { min-width: 0; }
+table.t td .mbar { min-width: 44px; }
+.dcell { width: 22%; min-width: 120px; }
+@media (max-width: 1400px) { .g2-ancho { grid-template-columns: 1fr; } }
+/* encabezados de tabla fijos al bajar (debajo de la barra de contexto de 56 px) */
+@media (min-width: 1025px) {
+  .tw { overflow: visible; }
+  table.t th { position: sticky; top: 56px; z-index: 5; box-shadow: 0 1px 0 rgba(13,27,42,.12); }
+  .card > .tw > table.t tr:first-child th:first-child { border-top-left-radius: 15px; }
+  .card > .tw > table.t tr:first-child th:last-child { border-top-right-radius: 15px; }
+  .card > .tw:first-child { border-radius: 16px 16px 0 0; }
+}

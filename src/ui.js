@@ -422,16 +422,17 @@
     const esReal = filas.some(x => x.real);
     filas.sort((a, b) => b.X.uai - a.X.uai);
     const conPlan = esReal && filas.some(x => x.plan);
-    let rows = filas.map(x => '<tr class="click' + (x.sede === S.sede ? ' sel' : '') + '" data-sede="' + esc(x.sede) + '"><td>' + esc(x.sede) + '</td><td>' + fM(x.X.ing) + '</td><td>' + fP(x.X.mcP) + '</td><td>' + fP(x.X.pauP) + '</td><td class="' + (x.X.con < 0 ? 'neg' : '') + '">' + fM(x.X.con) + '</td><td class="' + (x.X.uai < 0 ? 'neg' : '') + '">' + fM(x.X.uai) + '</td><td>' + fP(x.X.uaiP) + '</td>' +
+    const mxU = Math.max(1, ...filas.map(x => Math.abs(x.X.uai)));
+    const div = v => '<div class="dbar"><span class="' + (v < 0 ? 'n' : 'p') + '" style="width:' + (Math.abs(v) / mxU * 50).toFixed(1) + '%"></span></div>';
+    let rows = filas.map(x => '<tr class="click' + (x.sede === S.sede ? ' sel' : '') + '" data-sede="' + esc(x.sede) + '"><td>' + esc(x.sede) + '</td><td>' + fM(x.X.ing) + '</td><td>' + fP(x.X.mcP) + '</td><td>' + fP(x.X.pauP) + '</td><td class="' + (x.X.con < 0 ? 'neg' : '') + '">' + fM(x.X.con) + '</td><td class="' + (x.X.uai < 0 ? 'neg' : '') + '">' + fM(x.X.uai) + '</td><td class="dcell">' + div(x.X.uai) + '</td><td>' + fP(x.X.uaiP) + '</td>' +
       (conPlan ? '<td>' + fM(x.plan && x.plan.uai) + '</td><td>' + (x.plan ? varTxt(x.real.uai, x.plan.uai) : '—') + '</td>' : '') + '</tr>').join('');
     const T = C.completar(C.sumar(filas.map(x => x.X)));
-    rows += '<tr class="tot"><td>Total empresa</td><td>' + fM(T.ing) + '</td><td>' + fP(T.mcP) + '</td><td>' + fP(T.pauP) + '</td><td>' + fM(T.con) + '</td><td class="' + (T.uai < 0 ? 'neg' : '') + '">' + fM(T.uai) + '</td><td>' + fP(T.uaiP) + '</td>' + (conPlan ? '<td></td><td></td>' : '') + '</tr>';
+    rows += '<tr class="tot"><td>Total empresa</td><td>' + fM(T.ing) + '</td><td>' + fP(T.mcP) + '</td><td>' + fP(T.pauP) + '</td><td>' + fM(T.con) + '</td><td class="' + (T.uai < 0 ? 'neg' : '') + '">' + fM(T.uai) + '</td><td></td><td>' + fP(T.uaiP) + '</td>' + (conPlan ? '<td></td><td></td>' : '') + '</tr>';
     const pos = filas.filter(x => x.X.uai > 0), neg = filas.filter(x => x.X.uai < 0);
     const sp = pos.reduce((a, x) => a + x.X.uai, 0), sn = neg.reduce((a, x) => a + x.X.uai, 0);
     return '<section class="section" id="s-sed"><p class="eyebrow">' + num() + ' — Sedes</p><h2>Resultado por sede · ' + nombreMes(S.mes) + (esReal ? '' : ' (plan)') + '</h2><div class="divider"></div>' +
       '<p class="lead">' + pos.length + ' sedes aportan ' + fM(sp) + ' y ' + neg.length + ' restan ' + fM(Math.abs(sn)) + (sp ? ': las sedes en pérdida se comen el ' + nf0.format(Math.abs(sn) / sp * 100) + '% de lo que generan las demás.' : '.') + ' Haga clic en una sede para ver su detalle.</p>' +
-      '<div class="grid g2"><div class="card" style="padding:0"><div class="tw"><table class="t"><tr><th>Sede</th><th>Ingresos</th><th>MC %</th><th>Pauta %</th><th>Contribución</th><th>Utilidad</th><th>Margen</th>' + (conPlan ? '<th>Utilidad plan</th><th>Var.</th>' : '') + '</tr>' + rows + '</table></div></div>' +
-      '<div class="card"><h3>Utilidad de gestión por sede ($ millones)</h3>' + chartSedes(filas.map(x => ({ n: x.sede, v: x.X.uai }))) + '</div></div></section>';
+      '<div class="card" style="padding:0"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Ingresos</th><th>MC %</th><th>Pauta %</th><th>Contribución</th><th>Utilidad</th><th class="dcell" style="text-align:center">Pérdida · Utilidad</th><th>Margen</th>' + (conPlan ? '<th>Utilidad plan</th><th>Var.</th>' : '') + '</tr>' + rows + '</table></div></div></section>';
   }
 
   // ------------------------------------------------------------ 04 gastos
@@ -479,9 +480,10 @@
     // grupos nuevos enteros: los del plan; en el presupuesto vigente, los del plan base por el factor de volumen de cada sede, redondeados
     const gSede = (s, i) => S.esc === 'vigente' ? Math.round(((PL.grupos.base[s] || [])[i] || 0) * PL.plan.vigente[s].f) : ((PL.grupos[gk][s] || [])[i] || 0);
     const grupos = i => S.sede === 'Todas' ? C.NOMBRES_SEDES.reduce((a, s) => a + gSede(s, i), 0) : gSede(S.sede, i);
-    const fila = (t, fn, f, cls) => '<tr class="' + (cls || '') + '"><td>' + t + '</td>' + Ms.map((x, i) => { const v = fn(x, i); return '<td class="' + (f === fM && v < 0 ? 'neg' : '') + '">' + f(v) + '</td>'; }).join('') + '<td><b>' + (fn === null ? '' : f(fn(C.acumular(k => C.plan(S.ds, S.esc, k, S.sede), ks), -1))) + '</b></td></tr>';
+    const fMn = v => v == null || isNaN(v) ? '—' : (v < 0 ? '−' : '') + nf1.format(Math.abs(v) / 1e6); // $ millones sin símbolo: la tabla cabe sin desplazarse
+    const fila = (t, fn, f0, cls) => { const f = f0 === fM ? fMn : f0; return '<tr class="' + (cls || '') + '"><td>' + t + '</td>' + Ms.map((x, i) => { const v = fn(x, i); return '<td class="' + (f0 === fM && v < 0 ? 'neg' : '') + '">' + f(v) + '</td>'; }).join('') + '<td><b>' + (fn === null ? '' : f(fn(C.acumular(k => C.plan(S.ds, S.esc, k, S.sede), ks), -1))) + '</b></td></tr>'; };
     const sumG = Array.from({ length: 12 }, (_, i) => grupos(i)).reduce((a, b) => a + (b || 0), 0);
-    const tabla = '<table class="t compact"><tr><th>' + esc(C.ESCENARIOS[S.esc]) + '</th>' + ks.map(k => '<th>' + C.keyLabel(k, true) + '</th>').join('') + '<th>Año</th></tr>' +
+    const tabla = '<table class="t compact plan-t"><tr><th>' + esc(C.ESCENARIOS[S.esc]) + ' · $ millones</th>' + ks.map(k => '<th>' + C.keyLabel(k, true) + '</th>').join('') + '<th>Año</th></tr>' +
       fila('Ingresos', x => x.ing, fM) + fila('Costos variables', x => x.cv, fM, 'det') + fila('Margen de contribución', x => x.mc, fM, 'sub') + fila('Margen de contribución %', x => x.mcP, fP, 'det') +
       fila('Gastos fijos de sede', x => x.fijos, fM) + fila('Pauta', x => x.pau, fM) + fila('Corporativo y financiero', x => x.corp + x.fin, fM) + fila('Utilidad de gestión', x => x.uai, fM, 'tot') + fila('Margen', x => x.uaiP, fP, 'det') +
       '<tr><td>Grupos nuevos a abrir</td>' + ks.map((k, i) => '<td>' + fN(grupos(i)) + '</td>').join('') + '<td><b>' + fN(sumG) + '</b></td></tr>' +
@@ -539,7 +541,7 @@
     return '<section class="section" id="s-cap"><p class="eyebrow">' + num() + ' — Capacidad y ocupación</p><h2>Salones, grupos, estudiantes y cursos</h2><div class="divider"></div>' +
       '<div class="insight" style="margin-bottom:20px"><h4>Lectura</h4><p>' + txt + '</p></div>' +
       '<div class="card" style="padding:0;margin-bottom:20px"><div class="tw"><table class="t compact"><tr><th>Sede</th><th>Salones</th><th>Franjas</th><th>Cupos</th><th>Grupos activos</th><th>Estudiantes activos</th><th>Ocup. franjas</th><th>Ocup. cupos</th><th>Grupos habilitables</th><th>Deserción</th><th>CAC</th></tr>' + rows + tot + '</table></div></div>' +
-      '<div class="grid g2"><div class="card"><h3>Cursos asignados · ' + esc(S.sede === 'Todas' ? 'empresa' : S.sede) + '</h3><div class="tw"><table class="t"><tr><th>Curso</th><th>Grupos</th><th>Estudiantes</th><th>Est./grupo</th><th>Programados dic-ene</th></tr>' + cursos +
+      '<div class="grid g2 g2-ancho"><div class="card"><h3>Cursos asignados · ' + esc(S.sede === 'Todas' ? 'empresa' : S.sede) + '</h3><div class="tw"><table class="t"><tr><th>Curso</th><th>Grupos</th><th>Estudiantes</th><th>Est./grupo</th><th>Programados dic-ene</th></tr>' + cursos +
       '<tr class="tot"><td>Total</td><td>' + fN(T.gruposCursos) + '</td><td>' + fN(T.estCursos) + '</td><td>' + (T.gruposCursos ? nf1.format(T.estCursos / T.gruposCursos) : '—') + '</td><td>' + fN(T.programados) + '</td></tr></table></div>' +
       '<p class="note">Grupos activos y ocupación: grupos simultáneos de octubre de 2026. Estudiantes activos: estado Activo en Power BI (corte ' + esc(G.corteOperativo) + '). Cursos: grupos iniciados entre julio y noviembre. Grupos habilitables: franjas hasta el tope de ' + fP(G.topeOcupacion) + ' menos grupos activos. Todo se edita en Parámetros.</p></div>' + salonesCard() + '</div></section>';
   }
