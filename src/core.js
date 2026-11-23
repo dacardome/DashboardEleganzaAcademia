@@ -443,9 +443,13 @@
     const cu = rows.Cursos; const hc = cu[4] || [];
     const iP = colDe(hc, 'Valor de cada pago 2026 (sitio web)'), iK = colDe(hc, 'N° pagos (inscripción + cuotas)'), iJ = colDe(hc, 'Duración (meses)'),
       iKit = colDe(hc, 'Kit / est.'), iM = colDe(hc, 'Costo por inscrito 2027'), iN = colDe(hc, 'Diploma 2027'), iO = colDe(hc, 'Docente por grupo por mes 2027');
+    const opc = n => hc.findIndex(h => norm(h) === norm(n));
+    const iU = opc('Uniforme / est.'), iC = opc('Cartilla / est.'), iIn = opc('Insumos profesor / est.'), iD = opc('Diploma + curso virtual / graduado');
     const cursos = [];
     for (let i = 5; i < cu.length && cu[i] && cu[i][0] && cursos.length < 7; i++) {
-      const r = cu[i]; cursos.push({ c: String(r[0]), p26: num(r[iP]), K: num(r[iK]), J: num(r[iJ]), kit26: num(r[iKit]), M: num(r[iM]), N: num(r[iN]), O: num(r[iO]), cum: [] });
+      const r = cu[i], x = { c: String(r[0]), p26: num(r[iP]), K: num(r[iK]), J: num(r[iJ]), kit26: num(r[iKit]), M: num(r[iM]), N: num(r[iN]), O: num(r[iO]), cum: [] };
+      if (iU >= 0 && iC >= 0 && iIn >= 0 && iD >= 0) { x.uni26 = num(r[iU]); x.cart26 = num(r[iC]); x.ins26 = num(r[iIn]); x.dip26 = num(r[iD]); }
+      cursos.push(x);
     }
     const filaCum = cu.findIndex(r => r && norm(r[0]) === 'CURSO' && norm(r[1]) === 'ACUM. MES 1');
     if (filaCum < 0) throw new Error('No se encontró la curva de deserción acumulada en la hoja Cursos.');
@@ -505,6 +509,16 @@
   }
   const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado']];
 
+  /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */
+  function simCostosCurso(B, p, x) {
+    const sp = B.sup, co = (p.costos || {})[x.c] || {}, fI = (1 + p.incI) / (1 + sp.incI), fS = (1 + p.incS) / (1 + sp.incS);
+    const v = (k, def) => co[k] == null ? def : co[k];
+    const kit = v('kit', x.kit26 * (1 + p.incI));
+    let uniforme = null, cartilla = null, insumos = null, otros;
+    if (x.uni26 != null) { uniforme = v('uniforme', x.uni26 * (1 + p.incI)); cartilla = v('cartilla', x.cart26 * (1 + p.incI)); insumos = v('insumos', x.ins26 * (1 + p.incI)); otros = uniforme + cartilla + insumos; }
+    else otros = x.M * fI - x.kit26 * (1 + p.incI);
+    return { kit, uniforme, cartilla, insumos, porInscrito: otros + kit, diploma: v('diploma', x.N * fI), docente: v('docente', x.O * fS), categorias: x.uni26 != null };
+  }
   /** Corre el escenario. Devuelve por sede y mes (12 meses del año del plan) y el consolidado. */
   function simular(B, p) {
     const sp = B.sup, NS = B.sedes.length, T = 14; // t = −2..11 (nov-26 a dic-27); índice u = t + 2
@@ -515,15 +529,16 @@
     const cur = B.cursos.map(x => {
       const igual = p.maqIgual && x.c === 'Maquillaje' && refMaq; // maquillaje al precio de los demás cursos (también en sedes sin aumento)
       const pr = (p.precios || {})[igual ? refMaq.c : x.c] || { insc: x.p26 * (1 + sp.incP), cuota: x.p26 * (1 + sp.incP) };
-      return { J: x.J, K: x.K, cum: x.cum, L26: x.p26 * (1 - p.desc), Lcong: (igual ? refMaq.p26 : x.p26) * (1 - p.desc), L27: (pr.insc + (x.K - 1) * pr.cuota) / x.K * (1 - p.desc),
-        M: x.M * fI, kit: x.kit26 * (1 + p.incI), N: x.N * fI, O: x.O * fS };
+      const K27 = Math.max(1, Math.round(((p.pagos || {})[igual ? refMaq.c : x.c]) || x.K));
+      const u = simCostosCurso(B, p, x);
+      const L26 = x.p26 * (1 - p.desc), Lcong = (igual ? refMaq.p26 : x.p26) * (1 - p.desc), L27 = (pr.insc + (K27 - 1) * pr.cuota) / K27 * (1 - p.desc);
+      return { J: x.J, cum: x.cum, pm26: L26 * x.K / x.J, pmCong: Lcong * x.K / x.J, pm27: L27 * K27 / x.J, M: u.porInscrito, kit: u.kit, N: u.diploma, O: u.docente };
     });
     const sed = B.sedes.map(x => { const q = p.sedes[x.n] || {}; return { F: x.ocMotor ? (q.oc == null ? x.ocBase : q.oc) / x.ocMotor : 1, kit: q.kit !== false, cong: !!q.congelar }; });
     for (const f of B.filas) {
       const [s, c, E, plan, G0, H0, I0] = f; const k = cur[c], q = sed[s], o = S[s];
       const G = plan ? G0 * q.F : G0, H = plan ? H0 * q.F * p.llen : H0, I = plan ? Math.min(1, I0 * p.des) : I0;
-      const L = E < 0 ? k.L26 : q.cong ? k.Lcong : k.L27;
-      const pagoMes = L * k.K / k.J;
+      const pagoMes = E < 0 ? k.pm26 : q.cong ? k.pmCong : k.pm27;
       for (let u = 0; u < T; u++) {
         const kk = u - 2 - E; if (kk < 0 || kk >= k.J) continue;
         const act = H * (1 - I * k.cum[kk]);
@@ -675,6 +690,6 @@
     deriveKey, deriveKeys, sha256hex, newKey, encryptDataset, decryptDataset, decryptWithKey, b64e, b64d,
     datasetVacio, incorporar,
     CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, cursosDetalle, presupuestoMes, evaluarInversion, mesesDesde,
-    SIM_LINEAS_FIJAS, SIM_PLANTILLAS, simDesdeExcel, simPlantilla, simular, simResolver, resumirSim
+    SIM_LINEAS_FIJAS, SIM_PLANTILLAS, simDesdeExcel, simPlantilla, simular, simResolver, resumirSim, simCostosCurso
   };
 });

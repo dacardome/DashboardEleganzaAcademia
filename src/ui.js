@@ -166,13 +166,16 @@
       '<button class="sbtn abrir-sim">Simulador 2027</button>' + (ds.params ? '<button class="sbtn" id="bparam">Parámetros</button>' : '') + '<button class="sbtn" id="bconf">Configuración</button></div>';
     $('#app').innerHTML = shell('Tablero financiero', lateral, ctx + '</div><button class="btn small solo-escritorio" id="bcargar">Cargar informe</button><div style="display:none">',
       (!S.db.ok && S.dirty ? '<div class="aviso aviso-top">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador. <a href="#" id="bguardar2">Descargar respaldo (dataset.json)</a></div>' : '') +
-      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secCursos() + secPlan() + (ds.params ? '' : secCriticas()) + '</main>' + footer());
+      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secCursos() + secPlan() + secPlanSede() + (ds.params ? '' : secCriticas()) + '</main>' + footer());
     activarShell(true);
     $('#fsede').onchange = e => { S.sede = e.target.value; render(); };
     $('#fmes').onchange = e => { S.mes = e.target.value; render(); };
     $('#fesc').onchange = e => { S.esc = e.target.value; render(); };
     $('#bcargar').onclick = modalCargar; $('#bcargar2').onclick = modalCargar;
     $('#bconf').onclick = modalConfig;
+    if ($('#psfuente')) $('#psfuente').onchange = e => { S.planFuente = e.target.value; const y = scrollY; render(); scrollTo(0, y); };
+    if ($('#pssede')) $('#pssede').onchange = e => { S.sede = e.target.value; const y = scrollY; render(); scrollTo(0, y); };
+    document.querySelectorAll('tr[data-psede]').forEach(tr => tr.onclick = () => { S.sede = tr.dataset.psede; render(); const el = document.getElementById('s-psed'); if (el) el.scrollIntoView(); });
     document.querySelectorAll('[data-sec="s-sim"], .abrir-sim').forEach(a => a.addEventListener('click', e => { e.preventDefault(); renderSim(); window.scrollTo(0, 0); }));
     if ($('#bparam')) $('#bparam').onclick = () => { S.psede = S.sede !== 'Todas' ? S.sede : S.psede; renderParams(); window.scrollTo(0, 0); };
     if ($('#bguardar2')) $('#bguardar2').onclick = e => { e.preventDefault(); guardarParams().then(render); };
@@ -186,7 +189,7 @@
     ['Resumen', [['s-top', 'Resumen del mes']]],
     ['Resultados', [['s-res', 'Estado de resultados'], ['s-pre', 'Presupuesto vs ejecución'], ['s-gas', 'Gastos'], ['s-ten', 'Tendencia']]],
     ['Sedes y cursos', [['s-sed', 'Resultado por sede'], ['s-cap', 'Capacidad y ocupación'], ['s-cur', 'Detalle por curso']]],
-    ['Plan 2027', [['s-plan', 'Escenarios del plan'], ['s-sim', 'Simulador de escenarios'], ['s-cri', 'Sedes críticas']]]
+    ['Plan 2027', [['s-plan', 'Escenarios del plan'], ['s-psed', 'Plan por sede'], ['s-sim', 'Simulador de escenarios'], ['s-cri', 'Sedes críticas']]]
   ];
   function navTablero(ds) {
     const existe = id => id === 's-top' || (ds.params ? id !== 's-cri' : !['s-cap', 's-pre', 's-cur'].includes(id));
@@ -496,6 +499,111 @@
     return '<section class="section" id="s-plan"><p class="eyebrow">' + num() + ' — Plan financiero ' + PL.anio + '</p><h2>Escenarios para ' + esc(S.sede === 'Todas' ? 'la empresa' : S.sede) + '</h2><div class="divider"></div>' +
       '<p class="lead">' + (PL.plan.vigente ? 'Presupuesto vigente: plan base recalculado con los parámetros de cada sede (incremento de ' + fP2(S.ds.params.generales.incPrecio) + ' en cuotas y los ajustes de salones, ocupación, kit y gastos cargados en Parámetros). ' : '') + 'Plan base: ocupación histórica de cada sede. Plan ajustado: ocupación necesaria en las sedes críticas para llegar al margen meta de ' + fP2(PL.meta) + '. Sin kit y sin aumento: el plan base sin el 5% de aumento de precio y sin el costo del kit. Los grupos a abrir son números enteros.</p>' +
       '<div class="grid g4">' + cards + '</div><div class="aviso info" style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap"><span>Para probar aumentos de precio, ocupación, kit, gastos fijos y pauta por sede, y ver el efecto en la utilidad y la caja, use el simulador de escenarios.</span><button class="btn small abrir-sim">Abrir el simulador</button></div><div class="card" style="margin-top:20px;padding:0"><div class="tw">' + tabla + '</div></div></section>';
+  }
+
+  // ------------------------------------------------------------ plan 2027 por sede
+  /** Fuentes del plan por sede: escenarios del Excel (ds.plan) y, si el simulador está cargado, sus escenarios. */
+  function planFuentes() {
+    const PL = S.ds.plan, out = [];
+    Object.entries(C.ESCENARIOS).forEach(([e, t]) => { if (PL && PL.plan[e]) out.push({ id: 'p:' + e, nombre: t }); });
+    const D = S.ds.sim && S.ds.sim.base ? simEstado() : null;
+    if (D) D.escenarios.filter(e => !['base', 'ajustado', 'sinkit'].includes(e.id)).forEach(e => out.push({ id: 's:' + e.id, nombre: e.nombre + ' (simulador)' }));
+    return out;
+  }
+  /** Plan mensual de una sede (o 'Todas') para una fuente: 12 meses con líneas completas, salones y franjas. */
+  function planDetalle(fuente, sede) {
+    const PL = S.ds.plan, G = S.ds.params ? S.ds.params.generales : null;
+    const fps = s => { const c = PL.capacidad[s] || {}; return G && G.franjasSalon ? G.franjasSalon : (c.salones ? c.franjas / c.salones : 14); };
+    const lista = sede === 'Todas' ? C.NOMBRES_SEDES : [sede];
+    let M, salones = 0, franjas = 0;
+    if (fuente.startsWith('p:')) {
+      const e = fuente.slice(2), ks = C.mesesPlan(S.ds);
+      M = ks.map(k => C.plan(S.ds, e, k, sede));
+      lista.forEach(s => { const sal = e === 'vigente' && S.ds.params ? S.ds.params.sedes[s].salonesPlan : (PL.capacidad[s] || {}).salones || 0; salones += sal; franjas += sal * fps(s); });
+    } else {
+      const D = simEstado(), E = D.escenarios.find(x => x.id === fuente.slice(2)) || D.escenarios[0], R = simCorrer(E.p);
+      const norm1 = s => R.sedes.find(x => x.n === s).M.map(m => Object.assign({ ing: m.ing, cvPlan: m.cv, bonPlan: m.bon, pau: m.pau, corp: m.corp, fin: m.fin, nue: m.nue, act: m.act, ga: m.ga }, m.fx));
+      const porS = lista.map(norm1);
+      M = Array.from({ length: 12 }, (_, i) => { const z = {}; porS.forEach(arr => { for (const [k, v] of Object.entries(arr[i])) z[k] = (z[k] || 0) + v; }); return C.acumular(() => z, [0]); });
+      lista.forEach(s => { const q = E.p.sedes[s] || {}, b = D.base.sedes.find(x => x.n === s) || {}; const sal = q.salones || b.salones || 0; salones += sal; franjas += sal * fps(s); });
+    }
+    const A = C.acumular((k, i) => M[i], M.map((_, i) => i));
+    A.pe = A.pe != null ? A.pe / 12 : null; A.act = A.act / 12; A.ga = A.ga / 12;
+    return { M, A, salones, franjas, ocup: franjas ? A.ga / franjas : 0 };
+  }
+  function secPlanSede() {
+    const PL = S.ds.plan; if (!PL) return '';
+    const fuentes = planFuentes();
+    if (!S.planFuente || !fuentes.find(f => f.id === S.planFuente)) S.planFuente = (fuentes.find(f => f.id === 'p:' + S.esc) || fuentes[0]).id;
+    const fz = S.planFuente, nomF = fuentes.find(f => f.id === fz).nombre, sede = S.sede, emp = sede === 'Todas';
+    const T = planDetalle(fz, 'Todas'), X = emp ? T : planDetalle(fz, sede), A = X.A, AT = T.A;
+    const fMn = v => v == null || isNaN(v) ? '—' : (v < 0 ? '−' : '') + nf1.format(Math.abs(v) / 1e6);
+    const pct = (a, b) => b ? a / b : null;
+    const ocM = X.M.map(m => X.franjas ? m.ga / X.franjas : 0), ocMin = Math.min(...ocM), ocMax = Math.max(...ocM);
+    // narrativa
+    let narr;
+    if (emp) {
+      const rs = C.NOMBRES_SEDES.map(s => ({ s, u: planDetalle(fz, s).A.uai })).sort((a, b) => b.u - a.u);
+      const neg = rs.filter(r => r.u < 0);
+      narr = 'Con «' + esc(nomF) + '» la empresa opera ' + fN(X.salones) + ' salones con ' + fN(X.franjas) + ' franjas al mes y proyecta una ocupación promedio de <b>' + fP(X.ocup) + '</b> (entre ' + fP(ocMin) + ' y ' + fP(ocMax) + ' según el mes), con ' + fN(A.nue) + ' inscritos nuevos y ' + fN(A.act) + ' estudiantes activos en promedio. ' +
+        'Los ingresos llegan a ' + fM(A.ing) + ', los gastos fijos de sede a ' + fM(A.fijos) + ' (' + fP(pct(A.fijos, A.ing)) + ' de las ventas) y la utilidad de gestión a <b>' + fM(A.uai) + '</b>. ' +
+        'Las sedes que más aportan son ' + rs.slice(0, 3).map(r => esc(r.s) + ' (' + fM(r.u) + ')').join(', ') + (neg.length ? '; ' + neg.length + ' sedes restan, sobre todo ' + neg.slice(-3).reverse().map(r => esc(r.s) + ' (' + fM(r.u) + ')').join(', ') + '.' : '; ninguna sede resta.');
+    } else {
+      const comp = (a, b, mas, menos) => a > b * 1.1 ? mas : a < b * 0.9 ? menos : 'similar a';
+      narr = 'Con «' + esc(nomF) + '», ' + esc(sede) + ' opera ' + fN(X.salones) + ' salones (' + fN(X.franjas) + ' franjas al mes) y proyecta una ocupación promedio de <b>' + fP(X.ocup) + '</b>, frente a ' + fP(T.ocup) + ' de la empresa, con ' + fN(A.nue) + ' inscritos nuevos en el año y ' + fN(A.act) + ' estudiantes activos en promedio. ' +
+        'Pesa ' + fP(pct(A.ing, AT.ing)) + ' de los ingresos de la empresa y ' + fP(pct(A.fijos, AT.fijos)) + ' de sus gastos fijos. Sus fijos equivalen a ' + fP(pct(A.fijos, A.ing)) + ' de sus ventas (' + comp(pct(A.fijos, A.ing), pct(AT.fijos, AT.ing), 'por encima de', 'por debajo de') + ' ' + fP(pct(AT.fijos, AT.ing)) + ' de la empresa) y la pauta a ' + fP(A.pauP) + '. ' +
+        (A.uai >= 0 ? 'Cierra con utilidad de <b>' + fM(A.uai) + '</b>, ' + fP(A.uaiP) + ' de margen, y aporta ' + fP(pct(A.uai, Math.max(AT.uai, 1))) + ' de la utilidad de la empresa.' : 'Cierra con pérdida de <b>' + fM(A.uai) + '</b>: le resta ' + fM(-A.uai) + ' a la utilidad de la empresa. Para llegar al punto de equilibrio necesita vender ' + fM(A.pe) + ' al mes, ' + fP(pct(A.pe, A.ing / 12) - 1) + ' más de lo proyectado.');
+    }
+    // tarjetas
+    const card = (l, v, cap, neg) => '<div class="kpi"><div class="lab">' + l + '</div><div class="val' + (neg ? ' neg' : '') + '">' + v + '</div><div class="cap">' + cap + '</div></div>';
+    const peso = (a, b) => emp ? '' : ' · ' + fP(pct(a, b)) + ' de la empresa';
+    const kp = '<div class="kpis">' +
+      card('Salones', fN(X.salones), fN(X.franjas) + ' franjas al mes' + peso(X.salones, T.salones)) +
+      card('Ocupación proyectada', fP(X.ocup), 'Promedio del año · de ' + fP(ocMin) + ' a ' + fP(ocMax)) +
+      card('Inscritos nuevos ' + PL.anio, fN(A.nue), fN(A.nue / 12) + ' al mes' + peso(A.nue, AT.nue)) +
+      card('Estudiantes activos', fN(A.act), 'Promedio mensual · ' + fN(A.ga) + ' grupos activos') +
+      card('Ingresos ' + PL.anio, fM(A.ing), emp ? fM(A.ing / 12) + ' al mes' : fP(pct(A.ing, AT.ing)) + ' de la empresa') +
+      card('Gastos fijos de sede', fM(A.fijos), fP(pct(A.fijos, A.ing)) + ' de las ventas' + peso(A.fijos, AT.fijos)) +
+      card('Utilidad de gestión', fM(A.uai), fP(A.uaiP) + ' de margen' + (emp ? '' : ' · ' + (A.uai >= 0 ? 'aporta ' : 'resta ') + fM(Math.abs(A.uai))), A.uai < 0) +
+      card('Punto de equilibrio', fM(A.pe), 'Ventas al mes · margen de seguridad ' + fP(A.ms), A.ms < 0) + '</div>';
+    // estructura de gastos
+    const lineas = [['Ingresos', x => x.ing, 'sub'], ['Costo variable directo', x => x.cv], ['Bonificaciones e impuestos', x => x.bon], ['Margen de contribución', x => x.mc, 'sub'],
+      ...C.LINEAS_FIJAS.map(([k, t]) => [t, x => x[k] || 0, 'det']), ['Gastos fijos de sede', x => x.fijos], ['Pauta y mercadeo', x => x.pau], ['Corporativo asignado', x => x.corp], ['Gastos financieros', x => x.fin], ['Utilidad de gestión', x => x.uai, 'tot']];
+    const tEst = '<table class="t compact"><tr><th>' + PL.anio + ' · $ millones</th><th>' + esc(emp ? 'Empresa' : sede) + '</th><th>% de sus ventas</th>' + (emp ? '' : '<th>% en la empresa</th><th>Peso de la sede</th>') + '</tr>' +
+      lineas.map(([t, f, cls]) => { const v = f(A), vt = f(AT); return '<tr class="' + (cls || '') + '"><td>' + t + '</td><td class="' + (v < 0 ? 'neg' : '') + '">' + fMn(v) + '</td><td>' + fP(pct(v, A.ing)) + '</td>' + (emp ? '' : '<td>' + fP(pct(vt, AT.ing)) + '</td><td>' + (t.startsWith('Utilidad') || t.startsWith('Margen') ? '—' : fP(pct(v, vt))) + '</td>') + '</tr>'; }).join('') + '</table>';
+    // de cada $100 de ventas
+    const partes = x => [['Costo variable', x.cv, '#0B3FA8'], ['Bonificaciones', x.bon, '#3D84FF'], ['Fijos de sede', x.fijos, '#6B7C93'], ['Pauta', x.pau, '#F5A623'], ['Corporativo y financiero', x.corp + x.fin, '#B8C4D6'], ['Utilidad', x.uai, x.uai >= 0 ? '#16A34A' : '#DC2626']];
+    const barra = (t, x) => { const ps = partes(x), tot = ps.reduce((a, p) => a + Math.max(0, p[1]), 0) || 1;
+      return '<div class="cien"><div class="cien-t">' + esc(t) + '</div><div class="cien-b">' + ps.filter(p => p[1] > 0).map(p => '<span style="width:' + (p[1] / tot * 100).toFixed(2) + '%;background:' + p[2] + '" title="' + esc(p[0]) + ': ' + nf1.format(p[1] / x.ing * 100) + '"></span>').join('') + '</div>' +
+        '<div class="cien-l">' + ps.map(p => '<span><i style="background:' + p[2] + '"></i>' + esc(p[0]) + ' <b class="' + (p[1] < 0 ? 'neg' : '') + '">' + nf1.format(p[1] / x.ing * 100).replace(/^-/, '−') + '</b></span>').join('') + '</div></div>'; };
+    const cien = '<div class="card"><h3>De cada $100 de ventas</h3>' + (emp ? '' : barra(sede, A)) + barra('Empresa', AT) + '<p class="note">Una utilidad negativa no aparece en la barra: las demás partes suman más de $100.</p></div>';
+    // mes a mes
+    const fila = (t, fn, fmt, cls) => '<tr class="' + (cls || '') + '"><td>' + t + '</td>' + X.M.map((m, i) => { const v = fn(m, i); return '<td class="' + (fmt === fMn && v < 0 ? 'neg' : '') + '">' + fmt(v) + '</td>'; }).join('') + '<td><b>' + (fn.anual ? fn.anual() : '') + '</b></td></tr>';
+    const an = (fn, v) => { fn.anual = v; return fn; };
+    const tMes = '<table class="t compact plan-t"><tr><th>' + esc(emp ? 'Empresa' : sede) + '</th>' + C.mesesPlan(S.ds).map(k => '<th>' + C.keyLabel(k, true) + '</th>').join('') + '<th>Año</th></tr>' +
+      fila('Grupos activos', an(m => m.ga, () => fN(A.ga)), fN) + fila('Ocupación de franjas', an((m, i) => ocM[i], () => fP(X.ocup)), fP, 'sub') + fila('Inscritos nuevos', an(m => m.nue, () => fN(A.nue)), fN) + fila('Estudiantes activos', an(m => m.act, () => fN(A.act)), fN) +
+      fila('Ingresos', an(m => m.ing, () => fMn(A.ing)), fMn) + fila('Margen de contribución', an(m => m.mc, () => fMn(A.mc)), fMn) + fila('Gastos fijos de sede', an(m => m.fijos, () => fMn(A.fijos)), fMn) + fila('Pauta', an(m => m.pau, () => fMn(A.pau)), fMn) +
+      fila('Corporativo y financiero', an(m => m.corp + m.fin, () => fMn(A.corp + A.fin)), fMn) + fila('Utilidad de gestión', an(m => m.uai, () => fMn(A.uai)), fMn, 'tot') + '</table>';
+    // incidencia de cada sede (vista empresa)
+    let inc = '';
+    if (emp) {
+      const rows = C.NOMBRES_SEDES.map(s => { const d = planDetalle(fz, s); return { s, d }; }).sort((a, b) => b.d.A.ing - a.d.A.ing);
+      const tInc = '<table class="t compact"><tr><th>Sede · $ millones</th><th>Salones</th><th>Ocupación</th><th>Inscritos nuevos</th><th>Activos</th><th>Ingresos</th><th>% ingresos</th><th>Fijos</th><th>% fijos</th><th>Fijos / ventas</th><th>Utilidad</th><th>Margen</th></tr>' +
+        rows.map(({ s, d }) => { const a = d.A; return '<tr class="click" data-psede="' + esc(s) + '"><td>' + esc(s) + '</td><td>' + fN(d.salones) + '</td><td>' + fP(d.ocup) + '</td><td>' + fN(a.nue) + '</td><td>' + fN(a.act) + '</td><td>' + fMn(a.ing) + '</td><td>' + fP(pct(a.ing, AT.ing)) + '</td><td>' + fMn(a.fijos) + '</td><td>' + fP(pct(a.fijos, AT.fijos)) + '</td><td class="' + (pct(a.fijos, a.ing) > pct(AT.fijos, AT.ing) * 1.15 ? 'neg' : '') + '">' + fP(pct(a.fijos, a.ing)) + '</td><td class="' + (a.uai < 0 ? 'neg' : '') + '"><b>' + fMn(a.uai) + '</b></td><td>' + fP(a.uaiP) + '</td></tr>'; }).join('') +
+        '<tr class="tot"><td>Total empresa</td><td>' + fN(T.salones) + '</td><td>' + fP(T.ocup) + '</td><td>' + fN(AT.nue) + '</td><td>' + fN(AT.act) + '</td><td>' + fMn(AT.ing) + '</td><td>100%</td><td>' + fMn(AT.fijos) + '</td><td>100%</td><td>' + fP(pct(AT.fijos, AT.ing)) + '</td><td>' + fMn(AT.uai) + '</td><td>' + fP(AT.uaiP) + '</td></tr></table>';
+      const us = rows.map(r => [r.s, r.d.A.uai]).sort((a, b) => b[1] - a[1]), mx = Math.max(1, ...us.map(x => Math.abs(x[1])));
+      const hb = '<div class="hbars">' + us.map(([n, v]) => '<div class="hb"><span class="hb-n" title="' + esc(n) + '">' + esc(n) + '</span><span class="hb-t"><span class="hb-z" style="left:50%"></span><span class="hb-b ' + (v >= 0 ? 'p' : 'n') + '" style="left:' + (v >= 0 ? 50 : 50 - Math.abs(v) / mx * 50).toFixed(1) + '%;width:' + (Math.abs(v) / mx * 50).toFixed(1) + '%"></span></span><span class="hb-v ' + (v >= 0 ? 'up' : 'down') + '">' + fMn(v) + '</span></div>').join('') + '</div>';
+      inc = '<h3 class="sub-h">Incidencia de cada sede en el plan</h3><p class="note" style="margin:0 0 12px">Ordenadas por ingresos. «Fijos / ventas» en rojo cuando supera en más de 15% el promedio de la empresa. Toque una sede para ver su plan.</p>' +
+        '<div class="card" style="padding:0"><div class="tw">' + tInc + '</div></div><div class="card" style="margin-top:20px"><h3>Aporte de cada sede a la utilidad de gestión ($ millones)</h3>' + hb + '</div>';
+    }
+    const optsF = fuentes.map(f => '<option value="' + f.id + '"' + (f.id === fz ? ' selected' : '') + '>' + esc(f.nombre) + '</option>').join('');
+    const optsS = ['Todas'].concat(C.NOMBRES_SEDES).map(s => '<option value="' + esc(s) + '"' + (s === sede ? ' selected' : '') + '>' + (s === 'Todas' ? 'Toda la empresa' : esc(s)) + '</option>').join('');
+    return '<section class="section" id="s-psed"><p class="eyebrow">' + num() + ' — Plan ' + PL.anio + ' por sede</p><h2>Plan ' + PL.anio + ' de ' + esc(emp ? 'la empresa, sede por sede' : sede) + '</h2><div class="divider"></div>' +
+      '<div class="sim-ctrl psed-ctrl"><label class="sim-f"><span>Escenario</span><select id="psfuente">' + optsF + '</select></label><label class="sim-f"><span>Sede</span><select id="pssede">' + optsS + '</select></label></div>' +
+      '<p class="lead">' + narr + '</p>' + kp +
+      '<div class="grid g-side" style="margin-top:20px"><div class="card" style="padding:0"><div class="tw">' + tEst + '</div></div>' + cien + '</div>' +
+      '<h3 class="sub-h">Mes a mes</h3><div class="card" style="padding:0"><div class="tw">' + tMes + '</div></div>' + inc +
+      '<p class="note">Ocupación = grupos activos ÷ franjas disponibles (salones × ' + fN(S.ds.params ? S.ds.params.generales.franjasSalon : 14) + ' franjas por salón). ' + (fz.startsWith('s:') ? 'Escenario del simulador: salones, ocupación y gastos según lo cargado en el simulador.' : '') + '</p></section>';
   }
 
   // ------------------------------------------------------------ 06 sedes críticas
@@ -837,8 +945,8 @@
     const X = pick(R), Y = pick(RC), A = X.A, AC = Y.A;
     const quien = emp ? 'la empresa' : sel;
     // campos
-    const inp = (path, t, cls) => {
-      const v = getPath(E.p, path); let txt = '';
+    const inp = (path, t, cls, def) => {
+      let v = getPath(E.p, path); if (v == null) v = def; let txt = '';
       if (t === 'bool') return '<input type="checkbox" class="chk" data-sp="' + esc(path) + '" data-t="bool"' + (v ? ' checked' : '') + dis + '>';
       if (v != null) txt = t === 'mult' ? nf1.format((v - 1) * 100).replace(/,0$/, '') : t === 'pct' || t === 'pctn' ? nf1.format(v * 100).replace(/,0$/, '') : t === 'pesos' ? nf0.format(Math.round(v)) : String(v);
       return '<input type="text" inputmode="decimal" class="sim-in' + (cls ? ' ' + cls : '') + '" data-sp="' + esc(path) + '" data-t="' + t + '" value="' + esc(txt) + '"' + dis + '>';
@@ -883,20 +991,27 @@
     const puente = '<div class="hbars">' + barras(efx) + '<div class="hb hb-tot"><span class="hb-n"><b>Utilidad</b></span><span></span><span class="hb-v ' + (dU >= 0 ? 'up' : 'down') + '">' + (dU >= 0 ? '+' : '−') + fMn(Math.abs(dU)) + '</span></div></div>';
 
     // ---- precios
-    const precioTot = (c, pr) => pr.insc + (c.K - 1) * pr.cuota;
+    const kDe = c => Math.round((E.p.pagos || {})[c.c] || c.K);
+    const precioTot = (c, pr, K) => pr.insc + ((K || c.K) - 1) * pr.cuota;
     const pBase = D.escenarios.find(e => e.id === 'base').p.precios;
     const filasPre = B.cursos.map(c => {
       const igual = E.p.maqIgual && c.c === 'Maquillaje';
-      const pr = E.p.precios[igual ? 'Manicure' : c.c] || pBase[c.c]; const tot = precioTot(c, pr), t26 = c.p26 * c.K, tb = precioTot(c, pBase[c.c]);
+      const pr = E.p.precios[igual ? 'Manicure' : c.c] || pBase[c.c]; const tot = precioTot(c, pr, kDe(igual ? B.cursos.find(z => z.c === 'Manicure') : c)), t26 = c.p26 * c.K, tb = precioTot(c, pBase[c.c]);
       const dB = tot - tb;
-      return '<tr><td>' + esc(c.c) + (igual ? '<div class="mini">Igual a Manicure</div>' : '') + '</td><td>' + c.K + '</td><td>' + fPes(c.p26) + '</td><td>' + (igual ? fPes(pr.insc) : inp('precios.' + c.c + '.insc', 'pesos', 'w')) + '</td><td>' + (igual ? fPes(pr.cuota) : inp('precios.' + c.c + '.cuota', 'pesos', 'w')) + '</td><td><b>' + fPes(tot) + '</b></td><td>' + fP2(tot / t26 - 1) + '</td><td>' + (Math.abs(dB) < 1 ? '<span style="color:#6B7C93">igual</span>' : '<span class="' + (dB >= 0 ? 'up' : 'down') + '">' + (dB >= 0 ? '+' : '−') + fPes(Math.abs(dB)) + '</span>') + '</td></tr>';
+      return '<tr><td>' + esc(c.c) + (igual ? '<div class="mini">Igual a Manicure</div>' : '') + '</td><td>' + (igual ? kDe(B.cursos.find(z => z.c === 'Manicure')) : inp('pagos.' + c.c, 'int', 'xs', c.K)) + '</td><td>' + fPes(c.p26) + '</td><td>' + (igual ? fPes(pr.insc) : inp('precios.' + c.c + '.insc', 'pesos', 'w')) + '</td><td>' + (igual ? fPes(pr.cuota) : inp('precios.' + c.c + '.cuota', 'pesos', 'w')) + '</td><td><b>' + fPes(tot) + '</b></td><td>' + fP2(tot / t26 - 1) + '</td><td>' + (Math.abs(dB) < 1 ? '<span style="color:#6B7C93">igual</span>' : '<span class="' + (dB >= 0 ? 'up' : 'down') + '">' + (dB >= 0 ? '+' : '−') + fPes(Math.abs(dB)) + '</span>') + '</td></tr>';
     }).join('');
+    const uCur = B.cursos.map(c => [c, C.simCostosCurso(B, E.p, c)]), conCat = uCur.every(([, u]) => u.categorias);
+    const colsCos = conCat ? [['uniforme', 'Uniforme'], ['kit', 'Kit'], ['cartilla', 'Cartilla'], ['insumos', 'Insumos profesor']] : [['kit', 'Kit']];
+    const tCos = '<table class="t compact sim-t"><tr><th>Curso · $ ' + B.anio + '</th>' + colsCos.map(([, t]) => '<th>' + t + ' por inscrito</th>').join('') + '<th>Costo por inscrito</th><th>Diploma por graduado</th><th>Docente por grupo al mes</th></tr>' +
+      uCur.map(([c, u]) => '<tr><td>' + esc(c.c) + '</td>' + colsCos.map(([k]) => '<td>' + inp('costos.' + c.c + '.' + k, 'pesos', 'w', u[k]) + '</td>').join('') + '<td><b>' + fPes(u.porInscrito) + '</b></td><td>' + inp('costos.' + c.c + '.diploma', 'pesos', 'w', u.diploma) + '</td><td>' + inp('costos.' + c.c + '.docente', 'pesos', 'w', u.docente) + '</td></tr>').join('') + '</table>';
+    const detCos = simDet('costos', 'Costos por estudiante y por grupo ' + B.anio, '<p class="note" style="margin:0 0 10px">Valores ' + B.anio + ' con el incremento de insumos y salarios de la sección siguiente. Al escribir un valor, ese costo queda fijo y deja de seguir el incremento.' + (conCat ? '' : ' Para editar uniforme, cartilla e insumos por separado, vuelva a cargar el Excel del plan desde el menú lateral.') + '</p><div class="tw">' + tCos + '</div>', false);
     const secPre = '<section class="section" id="sv-pre"><p class="eyebrow">Variables · 01</p><h2>Precios ' + B.anio + '</h2><div class="divider"></div>' +
       '<p class="lead">El precio de cada curso es la inscripción más las cuotas, con pagos cada 28 días. Solo cambia el precio de los grupos que inician en ' + B.anio + '; los estudiantes que ya están estudiando terminan con el precio 2026. Las sedes marcadas «Sin aumento» en Ajustes por sede cobran el precio 2026 aunque aquí se suba.</p>' +
       '<div class="card">' + (bloq ? '<p class="note" style="margin:0 0 12px">Descuento promedio: ' + fP(E.p.desc) + ' · Maquillaje al precio de los demás cursos: ' + (E.p.maqIgual ? 'sí' : 'no') + '</p>'
         : '<div class="sim-ctrl">' + lab('Aumento en la inscripción (%)', '<input type="text" inputmode="decimal" class="sim-in" id="qinsc" value="0">') + lab('Aumento en las cuotas (%)', '<input type="text" inputmode="decimal" class="sim-in" id="qcuota" value="5">') +
         '<button class="btn small" id="qaplicar">Aplicar a todos los cursos</button><span class="sim-sep"></span>' + lab('Descuento promedio (%)', inp('desc', 'pct')) + '<label class="sim-f sim-chk">' + inp('maqIgual', 'bool') + '<span>Maquillaje al precio de los demás cursos</span></label></div>') +
-      '<div class="tw"><table class="t compact sim-t"><tr><th>Curso</th><th>Pagos</th><th>Pago 2026</th><th>Inscripción ' + B.anio + '</th><th>Cuota ' + B.anio + '</th><th>Precio total</th><th>Aumento vs 2026</th><th>Vs plan base</th></tr>' + filasPre + '</table></div></div></section>';
+      '<div class="tw"><table class="t compact sim-t"><tr><th>Curso</th><th>N.º de pagos</th><th>Pago 2026</th><th>Inscripción ' + B.anio + '</th><th>Cuota ' + B.anio + '</th><th>Precio total</th><th>Aumento vs 2026</th><th>Vs plan base</th></tr>' + filasPre + '</table></div>' +
+      '<p class="note">N.º de pagos incluye la inscripción. Cambiarlo no cambia la duración del curso: el estudiante paga más o menos cuotas en el mismo tiempo, y el ingreso del curso se reparte en sus meses de estudio.</p>' + detCos + '</div></section>';
 
     // ---- volumen y costos generales
     const pp = x => fP(x);
@@ -914,6 +1029,38 @@
       lab('Corporativo mensual 2026 ($)', inp('corp', 'pesos', 'w'), 'Se le suma el IPC') + lab('Gastos financieros mensuales ($)', inp('fin', 'pesos', 'w')) +
       lab('Caja al 1 de enero ($)', inp('caja', 'pesos', 'w'), 'Para la caja mes a mes') + '</div></div></div></section>';
 
+    // ---- simulador de una sede
+    const una = S.simUna && B.sedes.find(x => x.n === S.simUna) ? S.simUna : (!emp ? sel : (B.sedes.find(x => x.critica) || B.sedes[0]).n);
+    const xU = B.sedes.find(x => x.n === una), qU = E.p.sedes[una] || {}, rU = R.sedes.find(x => x.n === una), cU = RC.sedes.find(x => x.n === una), aU = rU.A, acU = cU.A;
+    const escFx = k => k === 'personal' ? (1 + E.p.incS) / (1 + B.sup.incS) : k === 'iva' ? 1 : (1 + E.p.ipc) / (1 + B.sup.ipc);
+    const nomFx = Object.fromEntries(C.LINEAS_FIJAS);
+    const ocU = qU.oc == null ? xU.ocBase : qU.oc, salU = qU.salones || xU.salones;
+    const gVol = '<div class="sim-grid">' + lab('Ocupación objetivo (%)', inp('sedes.' + una + '.oc', 'pct'), 'Plan base: ' + fP(xU.ocBase) + (xU.critica ? ' · ajustada: ' + fP(xU.ocAj) : '')) +
+      lab('Salones ' + B.anio, inp('sedes.' + una + '.salones', 'int'), 'Hoy: ' + xU.salones + ' · ocupación sobre ellos ' + fP(salU ? ocU * xU.salones / salU : 0)) +
+      '<label class="sim-f sim-chk">' + inp('sedes.' + una + '.congelar', 'bool') + '<span>Sin aumento de precio (cobra el precio 2026)</span></label></div>' +
+      '<dl class="kv" style="margin-top:12px"><dt>Nuevos inscritos ' + B.anio + '</dt><dd>' + fN(aU.nue) + ' · ' + fN(aU.nue / 12) + ' al mes</dd><dt>Estudiantes activos</dt><dd>' + fN(aU.act) + ' en promedio · ' + fN(aU.ga) + ' grupos</dd><dt>Ingresos</dt><dd>' + fM(aU.ing) + ' · ' + dif(aU.ing, acU.ing) + '</dd></dl>';
+    const gVar = '<label class="sim-f sim-chk">' + inp('sedes.' + una + '.kit', 'bool') + '<span>Entrega kit a los nuevos inscritos</span></label>' +
+      '<table class="t compact" style="margin-top:10px"><tr><th>Costo variable ' + B.anio + '</th><th>Año</th><th>% ventas</th><th>Vs ' + esc(Cmp.nombre) + '</th></tr>' +
+      [['Kit', 'cvKit'], ['Uniforme, cartilla e insumos', 'cvIns'], ['Docentes', 'cvDoc'], ['Diplomas', 'cvDip'], ['Bonificaciones e impuestos', 'bon']].map(([t, k]) => '<tr><td>' + t + '</td><td>' + fM(aU[k]) + '</td><td>' + fP(aU.ing ? aU[k] / aU.ing : 0) + '</td><td>' + dif(aU[k], acU[k], 'menos') + '</td></tr>').join('') + '</table>' +
+      '<p class="note">El costo de cada curso por inscrito, por graduado y por grupo se edita en Precios ' + B.anio + ' y aplica a todas las sedes.</p>';
+    const gFij = '<table class="t compact sim-t"><tr><th>Gasto fijo mensual</th><th>Plan ' + B.anio + '</th><th>Escenario</th><th>Variación</th></tr>' +
+      C.SIM_LINEAS_FIJAS.map(k => { const b0 = xU.fx[k] * escFx(k), v = rU.M[0].fx[k]; return '<tr><td>' + esc(nomFx[k] || k) + '</td><td>' + fPes(b0) + '</td><td><input type="text" inputmode="decimal" class="sim-in w" data-sp="sedes.' + esc(una) + '.red.' + k + '" data-t="fx" data-base="' + b0 + '" value="' + nf0.format(Math.round(v)) + '"' + dis + '></td><td>' + (Math.abs(v - b0) < 1 ? '<span style="color:#6B7C93">igual</span>' : '<span class="' + (v <= b0 ? 'up' : 'down') + '">' + fPP(v / b0 - 1).replace('pp', '%') + '</span>') + '</td></tr>'; }).join('') +
+      '<tr class="tot"><td>Total al mes</td><td>' + fPes(C.SIM_LINEAS_FIJAS.reduce((a, k) => a + xU.fx[k] * escFx(k), 0)) + '</td><td>' + fPes(rU.fijMes) + '</td><td></td></tr></table><p class="note">Plan ' + B.anio + ' ya incluye el incremento salarial y el IPC del escenario.</p>';
+    const gPau = '<div class="sim-grid">' + lab('Costo de pauta por inscrito (CAC ' + B.anio + ')', inp('sedes.' + una + '.cac', 'pesos', 'w'), 'Con IPC y la variación general: ' + fPes(rU.cac)) + '</div>' +
+      '<dl class="kv" style="margin-top:12px"><dt>Pauta del año</dt><dd>' + fM(aU.pau) + ' · ' + fP(aU.pauP) + ' de las ventas</dd><dt>Empresa</dt><dd>' + fP(R.anual.pauP) + ' de las ventas</dd></dl>';
+    const filasU = [['Ingresos', x => x.ing, 'sub'], ['Costo variable directo', x => x.cv], ['Bonificaciones e impuestos', x => x.bon], ['Margen de contribución', x => x.mc, 'sub'],
+      ...C.SIM_LINEAS_FIJAS.map(k => [nomFx[k] || k, x => (x.fx ? x.fx[k] : 0), 'det']), ['Gastos fijos de sede', x => x.fij], ['Pauta', x => x.pau], ['Corporativo y financiero', x => x.corp + x.fin], ['Utilidad', x => x.uai, 'tot']];
+    const anualFx = (r, k) => r.M.reduce((a, m) => a + m.fx[k], 0);
+    const pyg = '<table class="t compact"><tr><th>' + esc(una) + ' · $ millones</th><th>Escenario</th><th>' + esc(Cmp.nombre) + '</th><th>Diferencia</th></tr>' +
+      filasU.map(([t, f, cls]) => { const isFx = cls === 'det', k = isFx ? C.SIM_LINEAS_FIJAS.find(z => (nomFx[z] || z) === t) : null; const a = isFx ? anualFx(rU, k) : f(aU), b = isFx ? anualFx(cU, k) : f(acU);
+        return '<tr class="' + (cls || '') + '"><td>' + t + '</td><td class="' + (a < 0 ? 'neg' : '') + '">' + fMn(a) + '</td><td>' + fMn(b) + '</td><td>' + dif(a, b, t === 'Ingresos' || t.startsWith('Margen') || t === 'Utilidad' ? null : 'menos') + '</td></tr>'; }).join('') +
+      '<tr><td>Margen</td><td>' + fP(aU.uaiP) + '</td><td>' + fP(acU.uaiP) + '</td><td>' + dif(aU.uaiP, acU.uaiP, null, fP) + '</td></tr><tr><td>Punto de equilibrio mensual</td><td>' + fMn(aU.pe) + '</td><td>' + fMn(acU.pe) + '</td><td>' + dif(aU.pe, acU.pe, 'menos') + '</td></tr></table>';
+    const secUna = '<section class="section" id="sv-una"><p class="eyebrow">Variables · 03</p><h2>Simulador por sede</h2><div class="divider"></div>' +
+      '<div class="sim-ctrl psed-ctrl"><label class="sim-f"><span>Sede</span><select id="sunasel">' + B.sedes.map(x => '<option' + (x.n === una ? ' selected' : '') + '>' + esc(x.n) + '</option>').join('') + '</select></label>' +
+      '<p class="sim-res">Utilidad ' + B.anio + ': <b class="' + (aU.uai < 0 ? 'down' : '') + '">' + fM(aU.uai) + '</b> · ' + fP(aU.uaiP) + ' de margen · ' + dif(aU.uai, acU.uai) + ' frente a «' + esc(Cmp.nombre) + '»</p></div>' +
+      '<div class="grid g-side"><div>' + simDet('una-vol', 'Volumen y precio', gVol, true) + simDet('una-var', 'Costos variables', gVar, false) + simDet('una-fij', 'Gastos fijos por categoría', gFij, true) + simDet('una-pau', 'Pauta', gPau, false) + '</div>' +
+      '<div class="card" style="padding:0;align-self:start"><div class="tw">' + pyg + '</div></div></div></section>';
+
     // ---- ajustes por sede
     const sedeA = n => R.sedes.find(s => s.n === n), sedeC = n => RC.sedes.find(s => s.n === n);
     const filasSed = B.sedes.map(x => {
@@ -921,16 +1068,16 @@
       const oc2 = sal ? oc * x.salones / sal : oc;
       return '<tr class="' + (x.n === sel ? 'sel' : '') + '"><td>' + esc(x.n) + (x.critica ? ' <span class="tag red">crítica</span>' : '') + '</td><td>' + fP(x.ocBase) + '</td><td>' + inp('sedes.' + x.n + '.oc', 'pct', 'xs') + '</td><td>' + inp('sedes.' + x.n + '.salones', 'int', 'xs') + '</td><td class="' + (oc2 > 0.9 ? 'neg' : '') + '">' + fP(oc2) + '</td><td>' + inp('sedes.' + x.n + '.kit', 'bool') + '</td><td>' + inp('sedes.' + x.n + '.congelar', 'bool') + '</td><td>' + inp('sedes.' + x.n + '.cac', 'pesos') + '</td><td>' + fN(a.nue) + '</td><td class="' + (a.uai < 0 ? 'neg' : '') + '"><b>' + fMn(a.uai) + '</b></td><td>' + dif(a.uai, c.uai) + '</td></tr>';
     }).join('');
-    const secSed = '<section class="section" id="sv-sed"><p class="eyebrow">Variables · 03</p><h2>Ajustes por sede</h2><div class="divider"></div>' +
+    const secSed = '<section class="section" id="sv-sed"><p class="eyebrow">Variables · 04</p><h2>Ajustes por sede</h2><div class="divider"></div>' +
       '<p class="lead">Ocupación objetivo de franjas sobre los salones actuales, salones con los que opera en ' + B.anio + ', entrega de kit, sedes que no suben el precio y costo de pauta por inscrito (CAC). Si una sede entrega salones con los mismos grupos, deje la ocupación igual y baje los salones: la columna siguiente muestra la ocupación sobre los salones que quedan (en rojo si supera 90%).</p>' +
       '<div class="card" style="padding:0"><div class="tw"><table class="t compact sim-t"><tr><th>Sede</th><th>Ocupación plan base</th><th>Ocupación objetivo %</th><th>Salones ' + B.anio + '</th><th>Ocupación sobre esos salones</th><th>Kit</th><th>Sin aumento</th><th>CAC ' + B.anio + ' $</th><th>Nuevos inscritos</th><th>Utilidad $M</th><th>Vs ' + esc(Cmp.nombre) + '</th></tr>' + filasSed + '</table></div></div></section>';
 
     // ---- gastos fijos por sede
     const filasFij = B.sedes.map(x => {
       const s = sedeA(x.n), plan = C.SIM_LINEAS_FIJAS.reduce((a, k) => a + x.fx[k], 0), fx0 = sedeC(x.n).fijMes;
-      return '<tr class="' + (x.n === sel ? 'sel' : '') + '"><td>' + esc(x.n) + '</td><td>' + fMn(plan) + '</td>' + ['personal', 'arriendo', 'servicios', 'mantenimiento', 'otros'].map(k => '<td>' + inp('sedes.' + x.n + '.red.' + k, 'pct', 'xs') + '</td>').join('') + '<td><b>' + fMn(s.fijMes) + '</b></td><td>' + dif(s.fijMes * 12, fx0 * 12, 'menos') + '</td></tr>';
+      return '<tr class="' + (x.n === sel ? 'sel' : '') + '"><td>' + esc(x.n) + '</td><td>' + fMn(plan) + '</td>' + ['personal', 'arriendo', 'servicios', 'mantenimiento', 'otros'].map(k => '<td>' + inp('sedes.' + x.n + '.red.' + k, 'pctn', 'xs') + '</td>').join('') + '<td><b>' + fMn(s.fijMes) + '</b></td><td>' + dif(s.fijMes * 12, fx0 * 12, 'menos') + '</td></tr>';
     }).join('');
-    const secFij = '<section class="section" id="sv-fij"><p class="eyebrow">Variables · 04</p><h2>Gastos fijos por sede</h2><div class="divider"></div>' +
+    const secFij = '<section class="section" id="sv-fij"><p class="eyebrow">Variables · 05</p><h2>Gastos fijos por sede</h2><div class="divider"></div>' +
       '<p class="lead">Reducción porcentual sobre el presupuesto mensual ' + B.anio + ' de cada línea. El personal se ajusta además con el incremento salarial y las demás líneas con el IPC de la sección anterior. Cifras en millones de pesos al mes; la última columna es el efecto en el año.</p>' +
       '<div class="card" style="padding:0"><div class="tw"><table class="t compact sim-t"><tr><th>Sede</th><th>Fijos/mes plan</th><th>Personal −%</th><th>Arriendo −%</th><th>Servicios −%</th><th>Mantenim. −%</th><th>Otros −%</th><th>Fijos/mes escenario</th><th>Año vs ' + esc(Cmp.nombre) + '</th></tr>' + filasFij + '</table></div></div></section>';
 
@@ -986,7 +1133,7 @@
     // ---- armado
     const optsEsc = cur => D.escenarios.map(e => '<option value="' + e.id + '"' + (e.id === cur ? ' selected' : '') + '>' + esc(e.nombre) + '</option>').join('');
     const optsSede = ['Todas'].concat(B.sedes.map(x => x.n)).map(n => '<option value="' + esc(n) + '"' + (n === sel ? ' selected' : '') + '>' + (n === 'Todas' ? 'Toda la empresa' : esc(n)) + '</option>').join('');
-    const secciones = [['sv-res', 'Resultado del escenario'], ['sv-pre', 'Precios 2027'], ['sv-vol', 'Volumen y costos'], ['sv-sed', 'Ajustes por sede'], ['sv-fij', 'Gastos fijos por sede'], ['sv-men', 'Mes a mes y caja'], ['sv-psd', 'Resultado por sede'], ['sv-sen', 'Sensibilidad'], ['sv-meta', 'Meta de utilidad']];
+    const secciones = [['sv-res', 'Resultado del escenario'], ['sv-pre', 'Precios 2027'], ['sv-vol', 'Volumen y costos'], ['sv-una', 'Simulador por sede'], ['sv-sed', 'Ajustes por sede'], ['sv-fij', 'Gastos fijos por sede'], ['sv-men', 'Mes a mes y caja'], ['sv-psd', 'Resultado por sede'], ['sv-sen', 'Sensibilidad'], ['sv-meta', 'Meta de utilidad']];
     const lateral = '<nav class="side-nav" id="snav"><a href="#" class="volver" id="svolver">‹ Volver al tablero</a>' +
       '<div class="side-label">Escenarios · utilidad $M</div>' + D.escenarios.map(e => { const u = pick(simCorrer(e.p)).A.uai; return '<a href="#" class="sc-item' + (e.id === D.activo ? ' on' : '') + '" data-esc="' + e.id + '"><span>' + esc(e.nombre) + (e.bloqueado ? '' : ' <i class="sc-ed">editable</i>') + '</span><b class="' + (u < 0 ? 'down' : '') + '">' + fMn(u) + '</b></a>'; }).join('') +
       '<div class="side-label">Secciones</div>' + secciones.map(([id, t]) => '<a href="#' + id + '" data-sec="' + id + '" data-q="' + esc(norm(t)) + '">' + esc(t) + '</a>').join('') + '</nav>' +
@@ -1002,7 +1149,7 @@
       '<main>' + (bloq ? '<div class="aviso info" style="margin-top:20px">Este es un escenario de referencia calculado con el Excel del plan y no se puede editar. Para jugar con las variables, cree una copia: queda guardada y la ven todos los que entran con la clave.</div>' : '') +
       kp + '<section class="section" id="sv-res"><p class="eyebrow">Resultados · 01</p><h2>Resultado ' + B.anio + ' frente a «' + esc(Cmp.nombre) + '»</h2><div class="divider"></div>' +
       '<div class="grid g-side"><div class="card" style="padding:0"><div class="tw">' + tRes + '</div></div><div class="card"><h3>De dónde sale la diferencia en utilidad ($ millones)</h3>' + puente + '<p class="note">Positivo suma utilidad frente a «' + esc(Cmp.nombre) + '».</p></div></div></section>' +
-      secPre + secVol + secSed + secFij + secMes + secPS + secSen + secMeta +
+      secPre + secVol + secUna + secSed + secFij + secMes + secPS + secSen + secMeta +
       '<p class="note" style="margin-top:28px">Motor: el mismo modelo de cohortes del Excel del plan (' + esc(B.archivo || 'Plan financiero ' + B.anio) + ', cargado el ' + esc(B.cargado ? new Date(B.cargado).toLocaleDateString('es-CO') : '') + '). Con las plantillas reproduce el plan base, el escenario sin kit y el acordado del 19-nov. El plan ajustado puede diferir en unos pocos millones porque el Excel redondea los grupos a números enteros.</p></main>' + footer());
     activarShell(true);
     window.scrollTo(0, y0);
@@ -1027,6 +1174,8 @@
       $('#msi', m).onclick = () => { E.p = C.simPlantilla(B, $('#mpl', m).value); m.remove(); persistir(true); renderSim(); };
     };
     document.querySelectorAll('[data-sp]').forEach(el => el.addEventListener('change', () => simCambio(E, el)));
+    document.querySelectorAll('details[data-dk]').forEach(d => d.addEventListener('toggle', () => { S.simAbiertos = S.simAbiertos || {}; S.simAbiertos[d.dataset.dk] = d.open; }));
+    if ($('#sunasel')) $('#sunasel').onchange = e => { S.simUna = e.target.value; simRepintar(); };
     const cambiar = fn => { if (bloq) return; fn(E.p); E.actualizado = new Date().toISOString(); persistir(); simRepintar(); };
     if ($('#qaplicar')) $('#qaplicar').onclick = () => {
       const a = parseNum($('#qinsc').value), b = parseNum($('#qcuota').value);
@@ -1039,6 +1188,10 @@
     $('#qmetaok').onclick = () => simMeta(E, B);
     pintarChip();
   }
+  function simDet(k, titulo, cuerpo, abierto) {
+    const ab = S.simAbiertos && S.simAbiertos[k] != null ? S.simAbiertos[k] : abierto;
+    return '<details class="sim-det" data-dk="' + k + '"' + (ab ? ' open' : '') + '><summary>' + esc(titulo) + '</summary><div class="sim-det-b">' + cuerpo + '</div></details>';
+  }
   function simRepintar() {
     const act = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.sp : null;
     renderSim();
@@ -1049,7 +1202,11 @@
     const t = el.dataset.t, path = el.dataset.sp;
     let v;
     if (t === 'bool') v = el.checked;
-    else {
+    else if (t === 'fx') {
+      const b = parseFloat(el.dataset.base), x = parseNum(el.value.trim());
+      if (x == null || isNaN(x) || x < 0 || !(b > 0)) { toast('Escriba un valor en pesos.'); simRepintar(); return; }
+      v = 1 - x / b;
+    } else {
       const raw = el.value.trim(), neg = /^[−-]/.test(raw);
       v = parseNum(raw.replace(/^[−-]/, ''));
       if (v != null && neg) v = -v;
