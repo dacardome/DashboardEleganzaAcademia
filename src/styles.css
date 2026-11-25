@@ -374,3 +374,10 @@ select.pl-in { text-align: left; width: auto; }
 .kpis.kpis5 .kpi .val { font-size: 23px; }
 @media (max-width: 1200px) { .kpis.kpis5 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); } }
 @media (max-width: 760px) { .grid.g-side > *, .grid.g2 > * { min-width: 0; } .sim-grid { grid-template-columns: 1fr; } .sim-det, .sim-det-b { min-width: 0; max-width: 100%; } .card { min-width: 0; } }
+.sim-t td small.ref, .sim-f small.ref { display: block; font-size: 11px; color: var(--df-soft); margin-top: 3px; white-space: nowrap; }
+.seg { display: inline-flex; border: 1px solid var(--df-line); border-radius: 100px; padding: 3px; background: #fff; }
+.seg-b { border: 0; background: none; padding: 7px 16px; border-radius: 100px; font-family: var(--sora); font-size: 13px; font-weight: 600; color: var(--df-soft); cursor: pointer; }
+.seg-b.on { background: var(--df-blue); color: #fff; }
+a.lnk { color: var(--df-ink); text-decoration: none; border-bottom: 1px dotted #9DBBF5; } a.lnk:hover { color: var(--df-blue); }
+@media (min-width: 1025px) { .tw.tw-x { overflow-x: auto; } .tw.tw-x table.t th { position: static; } main:has(.sim-top) table.t th { top: var(--simtop, 56px); } }
+.tw.tw-x table.t td, .tw.tw-x table.t th { padding: 8px 9px; font-size: 12px; }
