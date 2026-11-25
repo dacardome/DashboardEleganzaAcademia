@@ -361,3 +361,16 @@ select.pl-in { text-align: left; width: auto; }
 .pl-nom select.pl-in { max-width: none; min-width: 96px; }
 
 .sim-t td.own .sim-in { background: var(--df-blue-ultra, #EBF2FF); border-color: #9DBBF5; }
+.sim-top { position: sticky; top: 58px; z-index: 6; margin-top: 20px; padding: 12px 20px; box-shadow: 0 6px 18px rgba(13,27,42,.06); }
+.sim-top .sim-ctrl { align-items: flex-end; }
+.sim-top select { min-width: 200px; max-width: 100%; }
+.sim-live { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--df-soft); padding-bottom: 6px; }
+.sim-live b { font-family: var(--sora); color: var(--df-ink); font-size: 15px; margin-left: 4px; } .sim-live b.down { color: var(--df-danger); }
+#sv-var, #sv-ind, #sv-res, #sv-vol, #sv-una, #sv-sed, #sv-fij, #sv-men, #sv-psd, #sv-sen, #sv-meta { scroll-margin-top: 170px; }
+@media (max-width: 760px) { .sim-top { position: static; } .sim-top select { min-width: 0; width: 100%; } .sim-top .sim-f { flex: 1 1 100%; } .sim-live { margin-left: 0; } }
+.hero-sim .hero-in { padding: 28px 24px 30px; } .hero-sim h1 { margin: 12px 0 6px; } .hero-sim .hero-acts { margin-top: 16px; }
+.sim-top select { padding: 8px 10px; border: 1px solid var(--df-line); border-radius: 8px; font-size: 14px; background: #fff; color: var(--df-ink); font-family: inherit; }
+.kpis.kpis5 { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 0; }
+.kpis.kpis5 .kpi .val { font-size: 23px; }
+@media (max-width: 1200px) { .kpis.kpis5 { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); } }
+@media (max-width: 760px) { .grid.g-side > *, .grid.g2 > * { min-width: 0; } .sim-grid { grid-template-columns: 1fr; } .sim-det, .sim-det-b { min-width: 0; max-width: 100%; } .card { min-width: 0; } }
