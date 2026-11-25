@@ -503,7 +503,7 @@
     const soloCuotas = inc => B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * (1 + inc)) }; });
     if (tipo === 'ajustado') B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
     if (tipo === 'sinkit') { sinAumento(); B.sedes.forEach(x => { sedes[x.n].kit = false; }); }
-    if (tipo === 'acordado' || tipo === 'acordadoMaq' || tipo === 'cuota219') {
+    if (tipo === 'acordado' || tipo === 'acordadoMaq' || tipo === 'cuota209') {
       soloCuotas(sp.incP);
       B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
       const s = n => sedes[n] || {};
@@ -511,11 +511,11 @@
       if (sedes.Sincelejo) { const x = s('Sincelejo'); x.oc = 0.6; x.kit = false; x.congelar = true; }
       ['Venecia', 'Zipaquirá'].forEach(n => { if (sedes[n]) sedes[n].oc = 0.6; });
       if (tipo === 'acordadoMaq') p.maqIgual = true;
-      if (tipo === 'cuota219') { const ref = (B.cursos.find(x => x.c === 'Manicure') || B.cursos[0]).p26; B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * 219000 / ref) }; }); }
+      if (tipo !== 'cuota209') { const ref = (B.cursos.find(x => x.c === 'Manicure') || B.cursos[0]).p26; B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * 219000 / ref) }; }); }
     }
     return p;
   }
-  const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota219', 'Cuota $219.000 (escenario 5)']];
+  const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota209', 'Alternativa: cuota $208.950']];
 
   /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */
   function simCostosCurso(B, p, x) {
