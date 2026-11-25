@@ -490,7 +490,34 @@
       filas.push([si[r[mA]], c, num(r[mE]), r[mF] === 'Plan' ? 1 : 0, r2(num(r[mG])), num(r[mH]), Math.round(num(r[mI]) * 1e6) / 1e6]);
     }
     if (filas.length < 1000) throw new Error('La hoja Motor no tiene valores calculados. Abra el archivo en Excel, guárdelo y vuelva a cargarlo.');
-    return { v: 1, archivo: archivo || '', cargado: new Date().toISOString(), anio: sup.anio, meta, sup, cursos, sedes, filas };
+    // precios y costos propios por sede del escenario 4 (hoja opcional Precios_Costos_Sede): vacío = general
+    const pcSede = {};
+    const pc = rows.Precios_Costos_Sede;
+    if (pc) {
+      const val = v => (v == null || v === '' ? null : num(v));
+      const h1 = pc.findIndex(r => r && norm(r[0]) === norm('Sede') && norm(r[1]) === norm('Ajuste kit (%)'));
+      const h2 = pc.findIndex(r => r && norm(r[0]) === norm('Sede') && norm(r[1]) === norm('Curso'));
+      const z = n => (pcSede[n] = pcSede[n] || {});
+      if (h1 >= 0) for (let i = h1 + 1; i < pc.length; i++) {
+        const r = pc[i]; if (!r || !r[0] || si[r[0]] === undefined) break;
+        const aj = { kit: val(r[1]), ins: val(r[2]), doc: val(r[3]), dip: val(r[4]) };
+        Object.keys(aj).forEach(k => { if (!aj[k]) delete aj[k]; });
+        if (Object.keys(aj).length) z(r[0]).cvAj = aj;
+        if (val(r[5]) != null) z(r[0]).bonImp = val(r[5]);
+      }
+      if (h2 >= 0) {
+        const H = pc[h2].map(x => norm(x)), col = t => H.indexOf(norm(t));
+        const pre = { insc: col('Inscripción sede'), cuota: col('Cuota sede') };
+        const cos = { kit: col('Kit sede'), uniforme: col('Uniforme sede'), cartilla: col('Cartilla sede'), insumos: col('Insumos profesor sede'), diploma: col('Diploma sede'), docente: col('Docente por grupo al mes sede') };
+        for (let i = h2 + 1; i < pc.length; i++) {
+          const r = pc[i]; if (!r || !r[0] || si[r[0]] === undefined) continue;
+          const c = cursos.find(x => norm(x.c) === norm(r[1])); if (!c) continue;
+          const tomar = (m, dst) => { const o = {}; Object.entries(m).forEach(([k, j]) => { if (j >= 0 && val(r[j]) != null) o[k] = val(r[j]); }); if (Object.keys(o).length) { const q = z(r[0]); (q[dst] = q[dst] || {})[c.c] = o; } };
+          tomar(pre, 'precios'); tomar(cos, 'costos');
+        }
+      }
+    }
+    return { v: 1, archivo: archivo || '', cargado: new Date().toISOString(), anio: sup.anio, meta, sup, cursos, sedes, filas, pcSede };
   }
 
   /** Parámetros del escenario a partir de una plantilla. */
@@ -513,11 +540,13 @@
       if (sedes.Venecia) sedes.Venecia.salones = 4; // sede nueva: 4 salones operativos en 2027 (confirmado 25-nov)
       if (tipo === 'acordadoMaq') p.maqIgual = true;
       if (tipo !== 'cuota209') { const ref = (B.cursos.find(x => x.c === 'Manicure') || B.cursos[0]).p26; B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * 219000 / ref) }; }); }
+      // precios y costos propios por sede definidos en el Excel (hoja Precios_Costos_Sede); la alternativa toma solo costos y bonificaciones
+      Object.entries(B.pcSede || {}).forEach(([n, o]) => { const q = sedes[n]; if (!q) return; const c = JSON.parse(JSON.stringify(o)); if (tipo === 'cuota209') delete c.precios; Object.assign(q, c); });
     }
     return p;
   }
   /** Versión de las plantillas y de la convención de ocupación (2: la ocupación objetivo es sobre los salones del plan). */
-  const SIM_VERSION = 2;
+  const SIM_VERSION = 3;
   const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota209', 'Alternativa: cuota $208.950']];
 
   /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */

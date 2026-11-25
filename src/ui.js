@@ -1388,7 +1388,7 @@
       prev.innerHTML = '<p class="muted">Leyendo ' + esc(file.name) + '… puede tardar unos segundos.</p>';
       await new Promise(r => setTimeout(r, 30));
       try {
-        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', sheets: ['Motor', 'Cursos', 'Sedes', 'Supuestos', 'Sedes_Criticas'], dense: true });
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', sheets: ['Motor', 'Cursos', 'Sedes', 'Supuestos', 'Sedes_Criticas', 'Precios_Costos_Sede'], dense: true });
         const rows = {}; wb.SheetNames.forEach(n => { if (wb.Sheets[n]) rows[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null }); });
         const B = C.simDesdeExcel(rows, file.name);
         const rb = C.simular(B, C.simPlantilla(B, 'base')).anual, ra = C.simular(B, C.simPlantilla(B, 'acordado')).anual;
