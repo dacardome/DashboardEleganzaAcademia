@@ -507,14 +507,17 @@
       soloCuotas(sp.incP);
       B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
       const s = n => sedes[n] || {};
-      if (sedes.Barrancabermeja) { const b = s('Barrancabermeja'); b.oc = B.sedes.find(x => x.n === 'Barrancabermeja').ocBase; b.salones = 2; b.red.arriendo = 0.5; b.red.servicios = 0.5; b.red.personal = 1 / 3; }
+      if (sedes.Barrancabermeja) { const xb = B.sedes.find(x => x.n === 'Barrancabermeja'); const b = s('Barrancabermeja'); b.salones = 2; b.oc = xb.ocBase * xb.salones / 2; b.red.arriendo = 0.5; b.red.servicios = 0.5; b.red.personal = 1 / 3; }
       if (sedes.Sincelejo) { const x = s('Sincelejo'); x.oc = 0.6; x.kit = false; x.congelar = true; }
       ['Venecia', 'Zipaquirá'].forEach(n => { if (sedes[n]) sedes[n].oc = 0.6; });
+      if (sedes.Venecia) sedes.Venecia.salones = 4; // sede nueva: 4 salones operativos en 2027 (confirmado 25-nov)
       if (tipo === 'acordadoMaq') p.maqIgual = true;
       if (tipo !== 'cuota209') { const ref = (B.cursos.find(x => x.c === 'Manicure') || B.cursos[0]).p26; B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * 219000 / ref) }; }); }
     }
     return p;
   }
+  /** Versión de las plantillas y de la convención de ocupación (2: la ocupación objetivo es sobre los salones del plan). */
+  const SIM_VERSION = 2;
   const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota209', 'Alternativa: cuota $208.950']];
 
   /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */
@@ -542,7 +545,7 @@
       const L26 = x.p26 * (1 - p.desc), Lcong = (igual ? refMaq.p26 : x.p26) * (1 - p.desc), L27 = (pr.insc + (K27 - 1) * pr.cuota) / K27 * (1 - p.desc);
       return { J: x.J, cum: x.cum, pm26: L26 * x.K / x.J, pmCong: Lcong * x.K / x.J, pm27: L27 * K27 / x.J, M: u.porInscrito, kit: u.kit, N: u.diploma, O: u.docente };
     });
-    const sed = B.sedes.map(x => { const q = p.sedes[x.n] || {}; return { F: x.ocMotor ? (q.oc == null ? x.ocBase : q.oc) / x.ocMotor : 1, kit: q.kit !== false, cong: !!q.congelar }; });
+    const sed = B.sedes.map(x => { const q = p.sedes[x.n] || {}, sal = q.salones || x.salones; return { F: x.ocMotor ? (q.oc == null ? x.ocBase : q.oc) * (x.salones ? sal / x.salones : 1) / x.ocMotor : 1, kit: q.kit !== false, cong: !!q.congelar }; });
     for (const f of B.filas) {
       const [s, c, E, plan, G0, H0, I0] = f; const k = cur[c], q = sed[s], o = S[s];
       const G = plan ? G0 * q.F : G0, H = plan ? H0 * q.F * p.llen : H0, I = plan ? Math.min(1, I0 * p.des) : I0;
@@ -698,6 +701,6 @@
     deriveKey, deriveKeys, sha256hex, newKey, encryptDataset, decryptDataset, decryptWithKey, b64e, b64d,
     datasetVacio, incorporar,
     CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, cursosDetalle, presupuestoMes, evaluarInversion, mesesDesde,
-    costoPersona, nominaActiva, SIM_LINEAS_FIJAS, SIM_PLANTILLAS, simDesdeExcel, simPlantilla, simular, simResolver, resumirSim, simCostosCurso
+    costoPersona, nominaActiva, SIM_LINEAS_FIJAS, SIM_PLANTILLAS, SIM_VERSION, simDesdeExcel, simPlantilla, simular, simResolver, resumirSim, simCostosCurso
   };
 });

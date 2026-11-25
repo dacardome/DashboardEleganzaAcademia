@@ -991,9 +991,15 @@
     const propios = (D.escenarios || []).filter(e => !e.bloqueado);
     D.escenarios = C.SIM_PLANTILLAS.map(([id, nombre]) => ({ id, nombre, bloqueado: true, p: C.simPlantilla(D.base, id) })).concat(propios);
   }
+  function B_sedesFix(B, p) {
+    if (!p || !p.sedes) return;
+    B.sedes.forEach(x => { const q = p.sedes[x.n]; if (q && q.oc != null && q.salones && x.salones && q.salones !== x.salones) q.oc = q.oc * x.salones / q.salones; });
+  }
   function simEstado() {
     const D = S.ds && S.ds.sim; if (!D || !D.base) return null;
-    if (!D.escenarios || C.SIM_PLANTILLAS.some(([id]) => !D.escenarios.find(e => e.id === id))) simSembrar(D);
+    if ((D.v || 1) < 2 && D.escenarios) // v2: la ocupación objetivo pasa a ser sobre los salones del plan; se conserva el volumen de cada escenario propio
+      D.escenarios.forEach(e => { if (!e.bloqueado) B_sedesFix(D.base, e.p); });
+    if (!D.escenarios || D.v !== C.SIM_VERSION || C.SIM_PLANTILLAS.some(([id]) => !D.escenarios.find(e => e.id === id))) { simSembrar(D); D.v = C.SIM_VERSION; }
     if (!D.escenarios.find(e => e.id === D.activo)) D.activo = (D.escenarios.find(e => !e.bloqueado) || D.escenarios.find(e => e.id === 'acordado') || D.escenarios[0]).id;
     if (!D.escenarios.find(e => e.id === D.comparar)) D.comparar = 'base';
     return D;
@@ -1110,8 +1116,8 @@
     const escFx = k => k === 'personal' ? (1 + E.p.incS) / (1 + B.sup.incS) : k === 'iva' ? 1 : (1 + E.p.ipc) / (1 + B.sup.ipc);
     const nomFx = Object.fromEntries(C.LINEAS_FIJAS);
     const ocU = qU.oc == null ? xU.ocBase : qU.oc, salU = qU.salones || xU.salones;
-    const gVol = '<div class="sim-grid">' + lab('Ocupación objetivo (%)', inp('sedes.' + una + '.oc', 'pct'), 'Plan base: ' + fP(xU.ocBase) + (xU.critica ? ' · ajustada: ' + fP(xU.ocAj) : '')) +
-      lab('Salones ' + B.anio, inp('sedes.' + una + '.salones', 'int'), 'Hoy: ' + xU.salones + ' · ocupación sobre ellos ' + fP(salU ? ocU * xU.salones / salU : 0)) +
+    const gVol = '<div class="sim-grid">' + lab('Ocupación objetivo (%)', inp('sedes.' + una + '.oc', 'pct'), 'Sobre los salones ' + B.anio + ' · plan base: ' + fP(xU.ocBase) + (xU.critica ? ' · ajustada: ' + fP(xU.ocAj) : '')) +
+      lab('Salones ' + B.anio, inp('sedes.' + una + '.salones', 'int'), 'Hoy: ' + xU.salones + (salU !== xU.salones ? ' · equivale a ' + fP(xU.salones ? ocU * salU / xU.salones : 0) + ' sobre los salones de hoy' : '')) +
       '<label class="sim-f sim-chk">' + inp('sedes.' + una + '.congelar', 'bool') + '<span>Sin aumento de precio (cobra el precio 2026)</span></label></div>' +
       '<dl class="kv" style="margin-top:12px"><dt>Nuevos inscritos ' + B.anio + '</dt><dd>' + fN(aU.nue) + ' · ' + fN(aU.nue / 12) + ' al mes</dd><dt>Estudiantes activos</dt><dd>' + fN(aU.act) + ' en promedio · ' + fN(aU.ga) + ' grupos</dd><dt>Ingresos</dt><dd>' + fM(aU.ing) + ' · ' + dif(aU.ing, acU.ing) + '</dd></dl>';
     const gVar = '<label class="sim-f sim-chk">' + inp('sedes.' + una + '.kit', 'bool') + '<span>Entrega kit a los nuevos inscritos</span></label>' +
@@ -1140,12 +1146,12 @@
     const sedeA = n => R.sedes.find(s => s.n === n), sedeC = n => RC.sedes.find(s => s.n === n);
     const filasSed = B.sedes.map(x => {
       const q = E.p.sedes[x.n] || {}, a = sedeA(x.n).A, c = sedeC(x.n).A, oc = q.oc == null ? x.ocBase : q.oc, sal = q.salones || x.salones;
-      const oc2 = sal ? oc * x.salones / sal : oc;
-      return '<tr class="' + (x.n === sel ? 'sel' : '') + '"><td>' + esc(x.n) + (x.critica ? ' <span class="tag red">crítica</span>' : '') + '</td><td>' + fP(x.ocBase) + '</td><td>' + inp('sedes.' + x.n + '.oc', 'pct', 'xs') + '</td><td>' + inp('sedes.' + x.n + '.salones', 'int', 'xs') + '</td><td class="' + (oc2 > 0.9 ? 'neg' : '') + '">' + fP(oc2) + '</td><td>' + inp('sedes.' + x.n + '.kit', 'bool') + '</td><td>' + inp('sedes.' + x.n + '.congelar', 'bool') + '</td><td>' + inp('sedes.' + x.n + '.cac', 'pesos') + '</td><td>' + fN(a.nue) + '</td><td class="' + (a.uai < 0 ? 'neg' : '') + '"><b>' + fMn(a.uai) + '</b></td><td>' + dif(a.uai, c.uai) + '</td></tr>';
+      const oc2 = x.salones ? oc * sal / x.salones : oc;
+      return '<tr class="' + (x.n === sel ? 'sel' : '') + '"><td>' + esc(x.n) + (x.critica ? ' <span class="tag red">crítica</span>' : '') + '</td><td>' + fP(x.ocBase) + '</td><td>' + inp('sedes.' + x.n + '.oc', 'pct', 'xs') + '</td><td>' + inp('sedes.' + x.n + '.salones', 'int', 'xs') + '</td><td>' + fP(oc2) + '</td><td>' + inp('sedes.' + x.n + '.kit', 'bool') + '</td><td>' + inp('sedes.' + x.n + '.congelar', 'bool') + '</td><td>' + inp('sedes.' + x.n + '.cac', 'pesos') + '</td><td>' + fN(a.nue) + '</td><td class="' + (a.uai < 0 ? 'neg' : '') + '"><b>' + fMn(a.uai) + '</b></td><td>' + dif(a.uai, c.uai) + '</td></tr>';
     }).join('');
     const secSed = '<section class="section" id="sv-sed"><p class="eyebrow">Variables · 04</p><h2>Ajustes por sede</h2><div class="divider"></div>' +
-      '<p class="lead">Ocupación objetivo de franjas sobre los salones actuales, salones con los que opera en ' + B.anio + ', entrega de kit, sedes que no suben el precio y costo de pauta por inscrito (CAC). Si una sede entrega salones con los mismos grupos, deje la ocupación igual y baje los salones: la columna siguiente muestra la ocupación sobre los salones que quedan (en rojo si supera 90%).</p>' +
-      '<div class="card" style="padding:0"><div class="tw"><table class="t compact sim-t"><tr><th>Sede</th><th>Ocupación plan base</th><th>Ocupación objetivo %</th><th>Salones ' + B.anio + '</th><th>Ocupación sobre esos salones</th><th>Kit</th><th>Sin aumento</th><th>CAC ' + B.anio + ' $</th><th>Nuevos inscritos</th><th>Utilidad $M</th><th>Vs ' + esc(Cmp.nombre) + '</th></tr>' + filasSed + '</table></div></div></section>';
+      '<p class="lead">Ocupación objetivo de franjas sobre los salones con los que opera cada sede en ' + B.anio + ', entrega de kit, sedes que no suben el precio y costo de pauta por inscrito (CAC). Si una sede cambia de salones, la columna «Equivale sobre salones de hoy» muestra el volumen frente a su capacidad actual: Barrancabermeja con 73% en 2 salones equivale a 36% de sus 4 de hoy; Venecia con 60% en 4 salones equivale a 120% de los 2 que tenía habilitados al corte.</p>' +
+      '<div class="card" style="padding:0"><div class="tw"><table class="t compact sim-t"><tr><th>Sede</th><th>Ocupación plan base</th><th>Ocupación objetivo % (salones ' + B.anio + ')</th><th>Salones ' + B.anio + '</th><th>Equivale sobre salones de hoy</th><th>Kit</th><th>Sin aumento</th><th>CAC ' + B.anio + ' $</th><th>Nuevos inscritos</th><th>Utilidad $M</th><th>Vs ' + esc(Cmp.nombre) + '</th></tr>' + filasSed + '</table></div></div></section>';
 
     // ---- gastos fijos por sede
     const filasFij = B.sedes.map(x => {
@@ -1361,7 +1367,8 @@
           '<p class="muted" style="font-size:13px">Estas cifras deben coincidir con las hojas Plan_2027 y Escenario_Acordado del Excel.</p><div class="row-actions"><button class="btn" id="sinc">Guardar y abrir el simulador</button></div>';
         $('#sinc', prev).onclick = async () => {
           const D = S.ds.sim = S.ds.sim || {};
-          D.base = B; simCache.clear(); simSembrar(D);
+          if ((D.v || 1) < 2 && D.escenarios) D.escenarios.forEach(e => { if (!e.bloqueado) B_sedesFix(B, e.p); });
+          D.base = B; simCache.clear(); simSembrar(D); D.v = C.SIM_VERSION;
           if (!D.escenarios.some(e => !e.bloqueado)) { D.escenarios.push({ id: 'u1', nombre: 'Mi escenario', bloqueado: false, p: C.simPlantilla(B, 'acordado'), creado: new Date().toISOString() }); D.activo = 'u1'; }
           if (S.db.ok) { S.dirty = true; await guardarAhora(); } else persistir();
           if (m) m.remove();
