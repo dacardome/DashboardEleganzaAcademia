@@ -298,9 +298,16 @@
     }
     return o;
   }
+  /** Costo mensual de una persona de la nómina de sede: empleado = salario × (1 + carga prestacional) + auxilio de transporte; contratista = honorario. */
+  function costoPersona(G, x) {
+    const sal = +x.salario || 0; if (x.tipo === 'servicios') return sal;
+    return sal * (1 + (G.cargaPrestacional == null ? 0.3835 : G.cargaPrestacional)) + (x.auxilio ? (G.auxilioTransporte == null ? 249095 : G.auxilioTransporte) : 0);
+  }
+  const nominaActiva = p => Array.isArray(p.nomina) && p.nomina.some(x => +x.salario > 0);
   function recalcular(ds) {
     const PL = ds.plan; if (!PL || !ds.params) return ds;
     const G = ds.params.generales; PL.plan.vigente = {};
+    for (const s of PL.sedes) { const p = ds.params.sedes[s]; if (nominaActiva(p)) p.presupuesto.personal = Math.round(p.nomina.reduce((a, x) => a + costoPersona(G, x), 0)); }
     for (const s of PL.sedes) PL.plan.vigente[s] = vigenteSede(PL, G, ds.params.sedes[s], s);
     return ds;
   }
@@ -496,7 +503,7 @@
     const soloCuotas = inc => B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * (1 + inc)) }; });
     if (tipo === 'ajustado') B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
     if (tipo === 'sinkit') { sinAumento(); B.sedes.forEach(x => { sedes[x.n].kit = false; }); }
-    if (tipo === 'acordado' || tipo === 'acordadoMaq') {
+    if (tipo === 'acordado' || tipo === 'acordadoMaq' || tipo === 'cuota219') {
       soloCuotas(sp.incP);
       B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
       const s = n => sedes[n] || {};
@@ -504,10 +511,11 @@
       if (sedes.Sincelejo) { const x = s('Sincelejo'); x.oc = 0.6; x.kit = false; x.congelar = true; }
       ['Venecia', 'Zipaquirá'].forEach(n => { if (sedes[n]) sedes[n].oc = 0.6; });
       if (tipo === 'acordadoMaq') p.maqIgual = true;
+      if (tipo === 'cuota219') { const ref = (B.cursos.find(x => x.c === 'Manicure') || B.cursos[0]).p26; B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * 219000 / ref) }; }); }
     }
     return p;
   }
-  const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado']];
+  const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota219', 'Cuota $219.000 (escenario 5)']];
 
   /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */
   function simCostosCurso(B, p, x) {
@@ -690,6 +698,6 @@
     deriveKey, deriveKeys, sha256hex, newKey, encryptDataset, decryptDataset, decryptWithKey, b64e, b64d,
     datasetVacio, incorporar,
     CURSOS, LINEAS_FIJAS, vigenteSede, recalcular, capacidad, cursosDetalle, presupuestoMes, evaluarInversion, mesesDesde,
-    SIM_LINEAS_FIJAS, SIM_PLANTILLAS, simDesdeExcel, simPlantilla, simular, simResolver, resumirSim, simCostosCurso
+    costoPersona, nominaActiva, SIM_LINEAS_FIJAS, SIM_PLANTILLAS, simDesdeExcel, simPlantilla, simular, simResolver, resumirSim, simCostosCurso
   };
 });

@@ -148,6 +148,8 @@
   function render() {
     const ds = S.ds;
     if (location.hash === '#simulador' && !S.simIni) { S.simIni = true; return renderSim(); }
+    if (location.hash === '#plan2027' && !S.simIni) { S.simIni = true; return renderPlan(); }
+    if (location.hash) history.replaceState(null, '', location.pathname);
     S.simIni = true;
     const ms = meses();
     const reales = new Set(C.mesesReales(ds));
@@ -163,19 +165,17 @@
       '<div class="sfield"><label for="fesc">Comparar con</label><select id="fesc">' + optsEsc + '</select></div></div>' +
       navTablero(ds) +
       '<div class="side-foot"><button class="btn small block solo-movil" id="bcargar2">Cargar informe</button>' +
-      '<button class="sbtn abrir-sim">Simulador 2027</button>' + (ds.params ? '<button class="sbtn" id="bparam">Parámetros</button>' : '') + '<button class="sbtn" id="bconf">Configuración</button></div>';
+      '<button class="sbtn abrir-plan">Plan 2027 y metas</button><button class="sbtn abrir-sim">Simulador 2027</button>' + (ds.params ? '<button class="sbtn" id="bparam">Parámetros</button>' : '') + '<button class="sbtn" id="bconf">Configuración</button></div>';
     $('#app').innerHTML = shell('Tablero financiero', lateral, ctx + '</div><button class="btn small solo-escritorio" id="bcargar">Cargar informe</button><div style="display:none">',
       (!S.db.ok && S.dirty ? '<div class="aviso aviso-top">' + esc(S.db.motivo) + ' Los cambios quedan solo en este navegador. <a href="#" id="bguardar2">Descargar respaldo (dataset.json)</a></div>' : '') +
-      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secCursos() + secPlan() + secPlanSede() + (ds.params ? '' : secCriticas()) + '</main>' + footer());
+      hero(V) + '<main>' + kpis(V) + (nsec = 0, '') + secResultados(V) + secPresupuesto(V) + secGastos(V) + secTendencia() + secSedes() + secCapacidad() + secCursos() + '</main>' + footer());
     activarShell(true);
     $('#fsede').onchange = e => { S.sede = e.target.value; render(); };
     $('#fmes').onchange = e => { S.mes = e.target.value; render(); };
     $('#fesc').onchange = e => { S.esc = e.target.value; render(); };
     $('#bcargar').onclick = modalCargar; $('#bcargar2').onclick = modalCargar;
     $('#bconf').onclick = modalConfig;
-    if ($('#psfuente')) $('#psfuente').onchange = e => { S.planFuente = e.target.value; const y = scrollY; render(); scrollTo(0, y); };
-    if ($('#pssede')) $('#pssede').onchange = e => { S.sede = e.target.value; const y = scrollY; render(); scrollTo(0, y); };
-    document.querySelectorAll('tr[data-psede]').forEach(tr => tr.onclick = () => { S.sede = tr.dataset.psede; render(); const el = document.getElementById('s-psed'); if (el) el.scrollIntoView(); });
+    document.querySelectorAll('[data-sec="v-plan"], .abrir-plan').forEach(a => a.addEventListener('click', e => { e.preventDefault(); renderPlan(); window.scrollTo(0, 0); }));
     document.querySelectorAll('[data-sec="s-sim"], .abrir-sim').forEach(a => a.addEventListener('click', e => { e.preventDefault(); renderSim(); window.scrollTo(0, 0); }));
     if ($('#bparam')) $('#bparam').onclick = () => { S.psede = S.sede !== 'Todas' ? S.sede : S.psede; renderParams(); window.scrollTo(0, 0); };
     if ($('#bguardar2')) $('#bguardar2').onclick = e => { e.preventDefault(); guardarParams().then(render); };
@@ -189,7 +189,7 @@
     ['Resumen', [['s-top', 'Resumen del mes']]],
     ['Resultados', [['s-res', 'Estado de resultados'], ['s-pre', 'Presupuesto vs ejecución'], ['s-gas', 'Gastos'], ['s-ten', 'Tendencia']]],
     ['Sedes y cursos', [['s-sed', 'Resultado por sede'], ['s-cap', 'Capacidad y ocupación'], ['s-cur', 'Detalle por curso']]],
-    ['Plan 2027', [['s-plan', 'Escenarios del plan'], ['s-psed', 'Plan por sede'], ['s-sim', 'Simulador de escenarios'], ['s-cri', 'Sedes críticas']]]
+    ['Plan 2027', [['v-plan', 'Plan 2027 y metas'], ['s-sim', 'Simulador de escenarios']]]
   ];
   function navTablero(ds) {
     const existe = id => id === 's-top' || (ds.params ? id !== 's-cri' : !['s-cap', 's-pre', 's-cur'].includes(id));
@@ -501,6 +501,32 @@
       '<div class="grid g4">' + cards + '</div><div class="aviso info" style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap"><span>Para probar aumentos de precio, ocupación, kit, gastos fijos y pauta por sede, y ver el efecto en la utilidad y la caja, use el simulador de escenarios.</span><button class="btn small abrir-sim">Abrir el simulador</button></div><div class="card" style="margin-top:20px;padding:0"><div class="tw">' + tabla + '</div></div></section>';
   }
 
+  // ------------------------------------------------------------ vista Plan 2027 (hoja aparte del resultado del mes)
+  function renderPlan() {
+    const ds = S.ds; if (!ds.plan) { render(); return; }
+    history.replaceState(null, '', '#plan2027');
+    nsec = 0;
+    const cuerpo = secPlanSede() + secPlan() + (ds.params ? '' : secCriticas());
+    const lateral = '<nav class="side-nav" id="snav"><a href="#" class="volver" id="plvolver">‹ Volver al tablero</a>' +
+      '<div class="side-label">Plan ' + ds.plan.anio + '</div><a href="#s-psed" data-sec="s-psed" data-q="plan por sede metas ocupacion ingresos">Plan por sede y metas</a><a href="#s-plan" data-sec="s-plan" data-q="escenarios del plan">Escenarios del plan</a>' +
+      (ds.params ? '' : '<a href="#s-cri" data-sec="s-cri" data-q="sedes criticas">Sedes críticas</a>') +
+      '<div class="side-label">Ver el plan de</div><a href="#" class="' + (S.sede === 'Todas' ? 'on' : '') + '" data-plsede="Todas" data-q="toda la empresa">Toda la empresa</a>' +
+      C.NOMBRES_SEDES.map(n => '<a href="#" class="' + (n === S.sede ? 'on' : '') + '" data-plsede="' + esc(n) + '" data-q="' + esc(norm(n)) + '">' + esc(n) + '</a>').join('') + '</nav>' +
+      '<div class="side-foot"><button class="sbtn abrir-sim">Simulador 2027</button>' + (ds.params ? '<button class="sbtn" id="bparam">Parámetros</button>' : '') + '<button class="sbtn" id="plvolver2">Volver al tablero</button></div>';
+    $('#app').innerHTML = shell('Plan ' + ds.plan.anio, lateral, 'Plan ' + ds.plan.anio + '<span class="ctx-sep">/</span>' + esc(S.sede === 'Todas' ? 'Toda la empresa' : S.sede),
+      '<main>' + cuerpo + '</main>' + footer());
+    activarShell(true);
+    const volver = e => { if (e) e.preventDefault(); history.replaceState(null, '', location.pathname); render(); window.scrollTo(0, 0); };
+    $('#plvolver').onclick = volver; $('#plvolver2').onclick = volver;
+    document.querySelectorAll('[data-plsede]').forEach(a => a.onclick = e => { e.preventDefault(); S.sede = a.dataset.plsede; renderPlan(); window.scrollTo(0, 0); });
+    if ($('#psfuente')) $('#psfuente').onchange = e => { S.planFuente = e.target.value; const y = scrollY; renderPlan(); scrollTo(0, y); };
+    if ($('#pssede')) $('#pssede').onchange = e => { S.sede = e.target.value; const y = scrollY; renderPlan(); scrollTo(0, y); };
+    document.querySelectorAll('tr[data-psede], tr[data-sede]').forEach(tr => tr.onclick = () => { S.sede = tr.dataset.psede || tr.dataset.sede; renderPlan(); window.scrollTo(0, 0); });
+    document.querySelectorAll('.abrir-sim').forEach(a => a.onclick = e => { e.preventDefault(); renderSim(); window.scrollTo(0, 0); });
+    if ($('#bparam')) $('#bparam').onclick = () => { S.psede = S.sede !== 'Todas' ? S.sede : S.psede; renderParams(); window.scrollTo(0, 0); };
+    pintarChip();
+  }
+
   // ------------------------------------------------------------ plan 2027 por sede
   /** Fuentes del plan por sede: escenarios del Excel (ds.plan) y, si el simulador está cargado, sus escenarios. */
   function planFuentes() {
@@ -530,6 +556,22 @@
     const A = C.acumular((k, i) => M[i], M.map((_, i) => i));
     A.pe = A.pe != null ? A.pe / 12 : null; A.act = A.act / 12; A.ga = A.ga / 12;
     return { M, A, salones, franjas, ocup: franjas ? A.ga / franjas : 0 };
+  }
+  function metasSede(X, A, sede, emp, PL) {
+    const ks = C.mesesPlan(S.ds), iMes = ks.indexOf(S.mes);
+    const cap = S.ds.params ? C.capacidad(S.ds, sede) : null, real = C.real(S.ds, S.mes, sede);
+    const metaMes = iMes >= 0 ? X.M[iMes].ing : A.ing / 12, metaOcMes = iMes >= 0 && X.franjas ? X.M[iMes].ga / X.franjas : X.ocup;
+    let insReal = null; const IM = S.ds.params && S.ds.params.inscritosMes && S.ds.params.inscritosMes[S.mes];
+    if (IM) { insReal = 0; (emp ? Object.values(IM) : [IM[sede] || {}]).forEach(cs => Object.values(cs).forEach(x => { insReal += +x.inscritos || 0; })); if (!insReal) insReal = null; }
+    const card = (l, v, cap2) => '<div class="kpi"><div class="lab">' + l + '</div><div class="val">' + v + '</div><div class="cap">' + cap2 + '</div></div>';
+    const hoyOc = cap ? (X.franjas ? cap.grupos / X.franjas : cap.ocupFranjas) : null, brecha = cap ? X.ocup - hoyOc : null;
+    const mesTxt = iMes >= 0 ? C.keyLabel(S.mes) : 'mes promedio';
+    return '<h3 class="sub-h" style="margin-top:8px">Metas ' + PL.anio + ' de ' + esc(emp ? 'la empresa' : sede) + '</h3><div class="kpis metas">' +
+      card('Meta de ocupación', fP(X.ocup), 'Promedio del año · ' + (cap ? 'hoy ' + fP(hoyOc) + (X.salones !== cap.salones ? ' sobre ' + fN(X.salones) + ' salones' : '') + (brecha > 0.005 ? ', faltan ' + nf1.format(brecha * 100) + ' puntos' : ', meta cumplida') : 'sin dato operativo')) +
+      card('Meta de ingresos del año', fM(A.ing), fM(A.ing / 12) + ' al mes en promedio') +
+      card('Meta de ingresos · ' + esc(mesTxt), fM(metaMes), real ? 'Real ' + esc(C.keyLabel(S.mes)) + ': ' + fM(real.ing) + ' (' + fP(real.ing / metaMes) + ' de la meta)' : 'Sin informe real del mes') +
+      card('Meta de inscritos nuevos', fN(A.nue / 12) + ' al mes', fN(A.nue) + ' en el año' + (insReal != null ? ' · real ' + esc(C.keyLabel(S.mes, true)) + ': ' + fN(insReal) : '')) + '</div>' +
+      '<p class="note" style="margin:8px 0 18px">Metas del escenario elegido. El dato real es del mes seleccionado en el tablero (' + esc(C.keyLabel(S.mes)) + ')' + (iMes < 0 ? '; como ese mes no es de ' + PL.anio + ', se compara contra la meta mensual promedio.' : '.') + '</p>';
   }
   function secPlanSede() {
     const PL = S.ds.plan; if (!PL) return '';
@@ -600,7 +642,7 @@
     const optsS = ['Todas'].concat(C.NOMBRES_SEDES).map(s => '<option value="' + esc(s) + '"' + (s === sede ? ' selected' : '') + '>' + (s === 'Todas' ? 'Toda la empresa' : esc(s)) + '</option>').join('');
     return '<section class="section" id="s-psed"><p class="eyebrow">' + num() + ' — Plan ' + PL.anio + ' por sede</p><h2>Plan ' + PL.anio + ' de ' + esc(emp ? 'la empresa, sede por sede' : sede) + '</h2><div class="divider"></div>' +
       '<div class="sim-ctrl psed-ctrl"><label class="sim-f"><span>Escenario</span><select id="psfuente">' + optsF + '</select></label><label class="sim-f"><span>Sede</span><select id="pssede">' + optsS + '</select></label></div>' +
-      '<p class="lead">' + narr + '</p>' + kp +
+      metasSede(X, A, sede, emp, PL) + '<p class="lead">' + narr + '</p>' + kp +
       '<div class="grid g-side" style="margin-top:20px"><div class="card" style="padding:0"><div class="tw">' + tEst + '</div></div>' + cien + '</div>' +
       '<h3 class="sub-h">Mes a mes</h3><div class="card" style="padding:0"><div class="tw">' + tMes + '</div></div>' + inc +
       '<p class="note">Ocupación = grupos activos ÷ franjas disponibles (salones × ' + fN(S.ds.params ? S.ds.params.generales.franjasSalon : 14) + ' franjas por salón). ' + (fz.startsWith('s:') ? 'Escenario del simulador: salones, ocupación y gastos según lo cargado en el simulador.' : '') + '</p></section>';
@@ -819,10 +861,11 @@
       if (t === 'bool') { obj[k] = el.checked; return; }
       if (t === 'text' || t === 'mes') { const v = el.value.trim(); if (t === 'mes' && v && !/^\d{4}-\d{2}$/.test(v)) errores.push('Apertura debe tener formato AAAA-MM'); obj[k] = v || (t === 'mes' ? null : ''); return; }
       let v = parseNum(el.value);
-      if (v == null) { if (t === 'pctOpt') { obj[k] = null; return; } errores.push('Valor inválido en ' + el.closest('label').querySelector('span').textContent); return; }
+      const nombre = el.dataset.n || (el.closest('label') && el.closest('label').querySelector('span') ? el.closest('label').querySelector('span').textContent : 'un campo');
+      if (v == null) { if (t === 'pctOpt') { obj[k] = null; return; } errores.push('Valor inválido en ' + nombre); return; }
       if (t === 'pct' || t === 'pctOpt' || t === 'pct2') v = v / 100;
       if (t === 'int') v = Math.round(v);
-      if (v < 0 && t !== 'pctOpt') { errores.push('No se permiten negativos en ' + el.closest('label').querySelector('span').textContent); return; }
+      if (v < 0 && t !== 'pctOpt') { errores.push('No se permiten negativos en ' + nombre); return; }
       obj[k] = v;
     });
     const p = S.ds.params.sedes[S.psede];
@@ -853,7 +896,7 @@
       '<div class="pf-kpis"><span>Utilidad 2027 base <b class="' + (vb.uai < 0 ? 'down' : '') + '">' + fM(vb.uai) + '</b></span><span>Vigente <b class="' + (vv.uai < 0 ? 'down' : 'up') + '">' + fM(vv.uai) + '</b></span><span>Ocupación hoy <b>' + fP(cap.ocupFranjas) + '</b></span><span>Factor de volumen <b>' + nf1.format(S.ds.plan.plan.vigente[s].f) + 'x</b></span></div></div>' +
       '<h4>Capacidad actual</h4><div class="pf-grid">' + campo('Salones habilitados', 's.salones', p.salones, 'int') + campo('Salones posibles', 's.salonesPosibles', p.salonesPosibles, 'int', 'Espacio disponible para habilitar') + campo('Grupos activos', 's.gruposActivos', p.gruposActivos, 'int') + campo('Estudiantes activos', 's.estudiantesActivos', p.estudiantesActivos, 'int') + campo('Deserción histórica', 's.desercion', p.desercion, 'pct') + '</div>' +
       '<h4>Plan 2027 de la sede</h4><div class="pf-grid">' + campo('Salones en 2027', 's.salonesPlan', p.salonesPlan, 'int') + campo('Ocupación objetivo 2027', 's.ocupPlan', p.ocupPlan, 'pct', 'Plan base: ' + fP(S.ds.plan.capacidad[s].ocup2027)) + campo('CAC 2027', 's.cac', p.cac, 'pesos', 'Plan: ' + fPesos(p.cacPlan)) + campo('Incremento de precio', 's.incPrecio', p.incPrecio, 'pctOpt', 'Vacío = general (' + fP2(G.incPrecio) + ')') + campo('Entrega kit', 's.kit', p.kit, 'bool') + '</div>' +
-      '<h4>Presupuesto mensual de gastos fijos 2027</h4><div class="pf-grid">' + C.LINEAS_FIJAS.map(([k, t]) => campo(t, 's.presupuesto.' + k, p.presupuesto[k], 'pesos', 'Plan: ' + fPesos(pp[k]))).join('') + '</div>' +
+      '<h4>Presupuesto mensual de gastos fijos 2027</h4>' + listaPresupuesto(p, pp, G) +
       '<h4>Cursos asignados</h4>' + cursos +
       '<h4>Inversión y apertura</h4><div class="pf-grid">' + campo('Apertura (AAAA-MM)', 's.apertura', p.apertura, 'mes') + campo('Inversión inicial', 's.inversion', p.inversion, 'pesos', 'Sin capital de trabajo') + campo('Sede nueva', 's.nueva', p.nueva, 'bool') + campo('Evaluar como inversión', 's.evaluar', p.evaluar, 'bool') + '</div>' +
       '<div class="pf-grid">' + campo('Nota o decisión', 's.nota', p.nota, 'textarea') + '</div>' +
@@ -861,7 +904,9 @@
       '<div><div class="card" id="pgen"><h3>Parámetros generales</h3><div class="pf-grid one">' + campo('Franjas por salón', 'g.franjasSalon', G.franjasSalon, 'int') + campo('Cupo por grupo', 'g.cupo', G.cupo, 'int') + campo('Tope de ocupación', 'g.topeOcupacion', G.topeOcupacion, 'pct') +
       campo('Incremento de precio 2027', 'g.incPrecio', G.incPrecio, 'pct2', 'Efectivo, aplicado en cuotas') + campo('Incremento del plan base', 'g.incPrecioBase', G.incPrecioBase, 'pct2') + campo('Meses de rampa', 'g.mesesRampa', G.mesesRampa, 'int', 'Meses para que los activos lleguen a la nueva ocupación') +
       campo('Tasa de oportunidad (CDT)', 'g.tasaDescuento', G.tasaDescuento, 'pct') + campo('Meses de capital de trabajo', 'g.mesesCapitalTrabajo', G.mesesCapitalTrabajo, 'int') + campo('Ocupación para expandir', 'g.ocupExpansion', G.ocupExpansion, 'pct') + campo('Meses de maduración', 'g.mesesMaduracion', G.mesesMaduracion, 'int') +
-      campo('Plazo máximo en pérdida (meses)', 'g.plazoMaxPerdida', G.plazoMaxPerdida, 'int') + campo('Horizonte de evaluación (meses)', 'g.horizonteMeses', G.horizonteMeses, 'int') + campo('Inversión de referencia sede nueva', 'g.inversionNuevaSede', G.inversionNuevaSede, 'pesos') + campo('Corte de datos operativos', 'g.corteOperativo', G.corteOperativo, 'mes') + '</div>' +
+      campo('Plazo máximo en pérdida (meses)', 'g.plazoMaxPerdida', G.plazoMaxPerdida, 'int') + campo('Horizonte de evaluación (meses)', 'g.horizonteMeses', G.horizonteMeses, 'int') + campo('Inversión de referencia sede nueva', 'g.inversionNuevaSede', G.inversionNuevaSede, 'pesos') + campo('Corte de datos operativos', 'g.corteOperativo', G.corteOperativo, 'mes') +
+      campo('Carga prestacional de nómina', 'g.cargaPrestacional', G.cargaPrestacional == null ? 0.3835 : G.cargaPrestacional, 'pct2', 'Pensión 12%, ARL 0,522%, caja 4%, cesantías 8,33%, intereses 1%, prima 8,33%, vacaciones 4,17%. Salud, SENA e ICBF exonerados (art. 114-1 E.T.). Validar con el contador.') +
+      campo('Auxilio de transporte mensual', 'g.auxilioTransporte', G.auxilioTransporte == null ? 249095 : G.auxilioTransporte, 'pesos', '2026: $249.095 (Decreto 1470 de 2025). Actualizar con el decreto de 2027.') + '</div>' +
       '<div class="row-actions"><button class="btn" id="pgaplicar">Aplicar generales</button></div><div id="pgerr"></div></div>' +
       (PR.cursosInfo ? '<div class="card" id="pcur" style="margin-top:20px"><h3>Cursos: precio y duración</h3><p class="note" style="margin:0 0 10px">Se usan para estimar el peso de cada curso en los ingresos.</p><div class="tw"><table class="t mini-t"><tr><th>Curso</th><th>Precio lista</th><th>Duración (meses)</th><th>Cupo</th></tr>' +
         C.CURSOS.map(([c, n]) => { const x = PR.cursosInfo[c] || {}; return '<tr><td>' + n + '</td><td><input data-p="i.' + c + '.precio" data-t="pesos" value="' + esc(fmtIn(x.precio, 'pesos')) + '" style="max-width:120px"></td><td><input data-p="i.' + c + '.duracion" data-t="num" value="' + (x.duracion || '') + '"></td><td><input data-p="i.' + c + '.cupo" data-t="int" value="' + (x.cupo || '') + '"></td></tr>'; }).join('') +
@@ -881,6 +926,14 @@
       C.recalcular(S.ds); persistir(true); renderParams(); toast(S.db.ok ? 'Cambios aplicados y guardados.' : 'Cambios aplicados solo en este navegador: falta conectar la base de datos.', 4000);
     };
     $('#paplicar').onclick = () => aplicar($('#pform'), '#perr');
+    const nominaCambio = fn => {
+      const errs = leerCampos($('#pform'));
+      if (errs.length) { $('#perr').innerHTML = '<p class="down">' + errs.map(esc).join('<br>') + '</p>'; return; }
+      const q = S.ds.params.sedes[S.psede]; q.nomina = Array.isArray(q.nomina) ? q.nomina : []; fn(q.nomina);
+      C.recalcular(S.ds); persistir(true); const y = scrollY; renderParams(); scrollTo(0, y);
+    };
+    $('#nagregar').onclick = () => nominaCambio(n => n.push({ cargo: '', nombre: '', tipo: 'nomina', salario: 0, auxilio: false }));
+    document.querySelectorAll('[data-nquitar]').forEach(b => b.onclick = () => nominaCambio(n => n.splice(+b.dataset.nquitar, 1)));
     $('#pgaplicar').onclick = () => aplicar($('#pgen'), '#pgerr');
     if ($('#pcaplicar')) $('#pcaplicar').onclick = () => aplicar($('#pcur'), '#pcerr');
     $('#preset').onclick = () => {
@@ -890,6 +943,28 @@
     };
     $('#pguardar').onclick = guardarParams;
     pintarChip();
+  }
+  function listaPresupuesto(p, pp, G) {
+    const nom = Array.isArray(p.nomina) ? p.nomina : [], activa = C.nominaActiva(p);
+    const costoN = nom.reduce((a, x) => a + C.costoPersona(G, x), 0);
+    const val = k => k === 'personal' && activa ? costoN : (+p.presupuesto[k] || 0);
+    const difP = (v, b) => { const d = v - (b || 0); return Math.abs(d) < 1 ? '<span style="color:#6B7C93">igual</span>' : '<span class="' + (d <= 0 ? 'up' : 'down') + '">' + (d > 0 ? '+' : '−') + fPesos(Math.abs(d)) + '</span>'; };
+    const filas = C.LINEAS_FIJAS.map(([k, t]) => '<tr><td>' + t + (k === 'personal' ? '<div class="mini">' + (activa ? nom.length + ' personas · suma de la nómina' : 'Valor global · desglóselo en la nómina de abajo') + '</div>' : '') + '</td><td>' + fPesos(pp[k]) + '</td><td>' +
+      (k === 'personal' && activa ? '<b>' + fPesos(costoN) + '</b>' : '<input type="text" inputmode="decimal" class="pl-in" data-p="s.presupuesto.' + k + '" data-t="pesos" data-n="' + esc(t) + '" value="' + esc(fmtIn(p.presupuesto[k], 'pesos')) + '">') + '</td><td>' + difP(val(k), pp[k]) + '</td></tr>').join('');
+    const tot = C.LINEAS_FIJAS.reduce((a, [k]) => a + val(k), 0), totP = C.LINEAS_FIJAS.reduce((a, [k]) => a + (+pp[k] || 0), 0);
+    const tLista = '<div class="tw"><table class="t compact pl-t"><tr><th>Línea de gasto mensual</th><th>Plan 2027</th><th>Presupuesto vigente</th><th>Diferencia</th></tr>' + filas +
+      '<tr class="tot"><td>Total gastos fijos al mes</td><td>' + fPesos(totP) + '</td><td>' + fPesos(tot) + '</td><td>' + difP(tot, totP).replace('class="up"', 'style="color:#7CE3A1"').replace('class="down"', 'style="color:#FF8A8A"') + '</td></tr></table></div>';
+    const fNom = nom.map((x, i) => '<tr><td class="pl-per"><input type="text" class="pl-in tx" data-p="s.nomina.' + i + '.cargo" data-t="text" data-n="cargo" value="' + esc(x.cargo || '') + '" placeholder="Cargo">' +
+      '<input type="text" class="pl-in tx pl-nombre" data-p="s.nomina.' + i + '.nombre" data-t="text" data-n="nombre" value="' + esc(x.nombre || '') + '" placeholder="Nombre (opcional)"></td>' +
+      '<td><select class="pl-in" data-p="s.nomina.' + i + '.tipo" data-t="text"><option value="nomina"' + (x.tipo !== 'servicios' ? ' selected' : '') + '>Nómina</option><option value="servicios"' + (x.tipo === 'servicios' ? ' selected' : '') + '>Servicios</option></select></td>' +
+      '<td><input type="text" inputmode="decimal" class="pl-in" data-p="s.nomina.' + i + '.salario" data-t="pesos" data-n="salario de la fila ' + (i + 1) + '" value="' + esc(fmtIn(x.salario, 'pesos')) + '"></td>' +
+      '<td style="text-align:center"><input type="checkbox" class="chk" data-p="s.nomina.' + i + '.auxilio" data-t="bool"' + (x.auxilio ? ' checked' : '') + (x.tipo === 'servicios' ? ' disabled' : '') + '></td>' +
+      '<td><b>' + fPesos(C.costoPersona(G, x)) + '</b></td><td><button class="btn ghost small" type="button" data-nquitar="' + i + '" title="Quitar a esta persona" aria-label="Quitar">×</button></td></tr>').join('');
+    const tNom = '<details class="sim-det pl-nom" open><summary>Nómina de la sede · ' + nom.length + (nom.length === 1 ? ' persona' : ' personas') + (activa ? ' · ' + fPesos(costoN) + ' al mes' : '') + '</summary><div class="sim-det-b">' +
+      (nom.length ? '<div class="tw"><table class="t compact pl-t"><tr><th>Cargo y nombre</th><th>Tipo</th><th>Salario u honorario</th><th>Aux. transp.</th><th>Costo mensual</th><th></th></tr>' + fNom + '</table></div>' : '<p class="note" style="margin:0 0 10px">Aún no hay personas registradas: el personal de sede usa el valor global de la lista. Al registrar la primera persona con salario, el personal pasa a ser la suma de la nómina.</p>') +
+      '<div class="row-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn ghost small" type="button" id="nagregar">Agregar persona</button></div>' +
+      '<p class="note">Costo de un empleado = salario × (1 + carga prestacional de ' + fP2(G.cargaPrestacional == null ? 0.3835 : G.cargaPrestacional) + ') + auxilio de transporte (' + fPesos(G.auxilioTransporte == null ? 249095 : G.auxilioTransporte) + ') si devenga hasta dos salarios mínimos. Prestación de servicios = honorario. Ambos valores se ajustan en Parámetros generales.</p></div></details>';
+    return tLista + tNom;
   }
   async function guardarParams() {
     await descargarRespaldo();
@@ -918,7 +993,7 @@
   }
   function simEstado() {
     const D = S.ds && S.ds.sim; if (!D || !D.base) return null;
-    if (!D.escenarios || !D.escenarios.some(e => e.bloqueado)) simSembrar(D);
+    if (!D.escenarios || C.SIM_PLANTILLAS.some(([id]) => !D.escenarios.find(e => e.id === id))) simSembrar(D);
     if (!D.escenarios.find(e => e.id === D.activo)) D.activo = (D.escenarios.find(e => !e.bloqueado) || D.escenarios.find(e => e.id === 'acordado') || D.escenarios[0]).id;
     if (!D.escenarios.find(e => e.id === D.comparar)) D.comparar = 'base';
     return D;
