@@ -454,7 +454,7 @@
     const iU = opc('Uniforme / est.'), iC = opc('Cartilla / est.'), iIn = opc('Insumos profesor / est.'), iD = opc('Diploma + curso virtual / graduado');
     const cursos = [];
     for (let i = 5; i < cu.length && cu[i] && cu[i][0] && cursos.length < 7; i++) {
-      const r = cu[i], x = { c: String(r[0]), p26: num(r[iP]), K: num(r[iK]), J: num(r[iJ]), kit26: num(r[iKit]), M: num(r[iM]), N: num(r[iN]), O: num(r[iO]), cum: [] };
+      const r = cu[i], x = { c: String(r[0]), cupo: opc('Cupo máx. grupo') >= 0 ? num(r[opc('Cupo máx. grupo')]) : null, p26: num(r[iP]), K: num(r[iK]), J: num(r[iJ]), kit26: num(r[iKit]), M: num(r[iM]), N: num(r[iN]), O: num(r[iO]), cum: [] };
       if (iU >= 0 && iC >= 0 && iIn >= 0 && iD >= 0) { x.uni26 = num(r[iU]); x.cart26 = num(r[iC]); x.ins26 = num(r[iIn]); x.dip26 = num(r[iD]); }
       cursos.push(x);
     }
@@ -573,12 +573,13 @@
       const K27 = Math.max(1, Math.round(((p.pagos || {})[igual ? refMaq.c : x.c]) || x.K));
       const u = simCostosCurso(B, p, x);
       const L26 = x.p26 * (1 - p.desc), Lcong = (igual ? refMaq.p26 : x.p26) * (1 - p.desc), L27 = (pr.insc + (K27 - 1) * pr.cuota) / K27 * (1 - p.desc);
-      return { J: x.J, cum: x.cum, pm26: L26 * x.K / x.J, pmCong: Lcong * x.K / x.J, pm27: L27 * K27 / x.J, M: u.porInscrito, kit: u.kit, N: u.diploma, O: u.docente, pr, K27, ref: igual ? refMaq.c : x.c };
+      return { J: x.J, cum: x.cum, pm26: L26 * x.K / x.J, pmCong: Lcong * x.K / x.J, pm27: L27 * K27 / x.J, M: u.porInscrito, kit: u.kit, N: u.diploma, O: u.docente, pr, K27, ref: igual ? refMaq.c : x.c, p26r: igual ? refMaq.p26 : x.p26 };
     });
     /** Pago mensual 2027 de un curso en una sede con precios propios (inscripción y cuota de la sede; lo que no se escriba sigue el precio general). */
     const pmSede = (q, i) => {
       const k = cur[i], own = (q.precios || {})[k.ref]; if (!own || (own.insc == null && own.cuota == null)) return null;
-      const insc = own.insc == null ? k.pr.insc : own.insc, cuota = own.cuota == null ? k.pr.cuota : own.cuota;
+      const gi = q.congelar ? k.p26r : k.pr.insc, gc = q.congelar ? k.p26r : k.pr.cuota; // lo no escrito sigue el general (o el 2026 si la sede no sube precio)
+      const insc = own.insc == null ? gi : own.insc, cuota = own.cuota == null ? gc : own.cuota;
       return (insc + (k.K27 - 1) * cuota) / k.K27 * (1 - p.desc) * k.K27 / k.J;
     };
     const sed = B.sedes.map(x => {
@@ -593,6 +594,7 @@
       const pm = q.precios && Object.keys(q.precios).length ? B.cursos.map((c, i) => pmSede(q, i)) : null;
       return { F: x.ocMotor ? (q.oc == null ? x.ocBase : q.oc) * (x.salones ? sal / x.salones : 1) / x.ocMotor : 1, kit: q.kit !== false, cong: !!q.congelar, cs, pm };
     });
+    const PC = B.sedes.map(() => B.cursos.map(() => ({ ga: 0, act: 0, nue: 0, gn: 0, ing: 0 }))); // por sede y curso, año del plan
     for (const f of B.filas) {
       const [s, c, E, plan, G0, H0, I0] = f; const q = sed[s], k = q.cs ? { ...cur[c], ...q.cs[c] } : cur[c], o = S[s];
       const G = plan ? G0 * q.F : G0, H = plan ? H0 * q.F * p.llen : H0, I = plan ? Math.min(1, I0 * p.des) : I0;
@@ -602,6 +604,7 @@
         const act = H * (1 - I * k.cum[kk]);
         o.ing[u] += act * pagoMes;
         o.act[u] += act; o.ga[u] += G; o.cvDoc[u] += G * k.O;
+        if (u >= 2) { const pc = PC[s][c]; pc.ga += G / 12; pc.act += act / 12; pc.ing += act * pagoMes; if (kk === 0 && plan) { pc.nue += H; pc.gn += G; } }
         if (kk === 0) { const kit = plan && !q.kit ? 0 : k.kit; o.cvKit[u] += H * kit; o.cvIns[u] += H * (k.M - k.kit); if (plan) o.nue[u] += H; }
         if (kk === k.J - 1) o.cvDip[u] += H * (1 - I) * k.N;
       }
@@ -642,7 +645,7 @@
     anual.cajaFin = caja; anual.cajaMin = cajaMin; anual.mesCajaMin = mesMin;
     sedes.forEach(s => { s.A = resumirSim(s.M); });
     anual.sedesPerdida = sedes.filter(s => s.A.uai < 0).length;
-    return { mensual, anual, sedes };
+    return { mensual, anual, sedes, porCurso: PC };
   }
   function resumirSim(M) {
     const A = {}; for (const x of M) for (const [k, v] of Object.entries(x)) if (typeof v === 'number' && !['caja'].includes(k)) A[k] = (A[k] || 0) + v;

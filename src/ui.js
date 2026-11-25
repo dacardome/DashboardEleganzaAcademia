@@ -1140,7 +1140,8 @@
     const prGen = c => { const ig = E.p.maqIgual && c.c === 'Maquillaje'; return E.p.precios[ig ? 'Manicure' : c.c] || pBase[c.c]; };
     const filasPU = B.cursos.map(c => {
       const ig = E.p.maqIgual && c.c === 'Maquillaje', ref = ig ? 'Manicure' : c.c, cRef = ig ? B.cursos.find(z => z.c === 'Manicure') : c, K = kDe(cRef), g = prGen(c), o = prU[ref] || {};
-      const insc = o.insc == null ? g.insc : o.insc, cuota = o.cuota == null ? g.cuota : o.cuota, tot = insc + (K - 1) * cuota, tg = g.insc + (K - 1) * g.cuota;
+      const cong = qU.congelar && !prU[ref], p26 = cRef.p26; // «Sin aumento»: la sede cobra el pago 2026 mientras no tenga precio propio
+      const insc = o.insc == null ? (cong ? p26 : g.insc) : o.insc, cuota = o.cuota == null ? (cong ? p26 : g.cuota) : o.cuota, tot = insc + (K - 1) * cuota, tg = g.insc + (K - 1) * g.cuota;
       const base = qU.congelar && !prU[ref] ? '<div class="mini">Sin aumento: cobra el precio 2026</div>' : '';
       const cel = (k, v) => '<td' + (o[k] != null ? ' class="own"' : '') + '>' + (ig ? fPes(v) : inp('sedes.' + una + '.precios.' + c.c + '.' + k, 'pesos', 'w', v)) + '</td>';
       return '<tr><td>' + esc(c.c) + (ig ? '<div class="mini">Igual a Manicure</div>' : '') + base + '</td><td>' + K + '</td>' + cel('insc', insc) + cel('cuota', cuota) + '<td><b>' + fPes(tot) + '</b></td><td>' + fPes(tg) + '</td><td>' + (Math.abs(tot - tg) < 1 ? '<span style="color:#6B7C93">igual</span>' : '<span class="' + (tot >= tg ? 'up' : 'down') + '">' + fPP(tot / tg - 1).replace('pp', '%') + '</span>') + '</td></tr>';
@@ -1174,10 +1175,24 @@
     const sumCV = (a, c) => '<div class="tw"><table class="t compact sim-t"><tr><th>Costo variable ' + B.anio + '</th><th>Año</th><th>% ventas</th><th>Vs ' + esc(Cmp.nombre) + '</th></tr>' +
       [['Kit', 'cvKit'], ['Uniforme, cartilla e insumos', 'cvIns'], ['Docentes', 'cvDoc'], ['Diplomas', 'cvDip'], ['Bonificaciones e impuestos', 'bon']].map(([t, k]) => '<tr><td>' + t + '</td><td>' + fM(a[k]) + '</td><td>' + fP(a.ing ? a[k] / a.ing : 0) + '</td><td>' + dif(a[k], c[k], 'menos') + '</td></tr>').join('') +
       '<tr class="tot"><td>Total</td><td>' + fM(a.cv + a.bon) + '</td><td>' + fP(a.ing ? (a.cv + a.bon) / a.ing : 0) + '</td><td>' + dif(a.cv + a.bon, c.cv + c.bon, 'menos') + '</td></tr></table></div>';
+    // ocupación y volumen por curso del escenario (empresa o sede)
+    const idxSel = emp ? B.sedes.map((x, i) => i) : [B.sedes.findIndex(x => x.n === sel)];
+    const fpsV = (S.ds && S.ds.params && S.ds.params.generales && S.ds.params.generales.franjasSalon) || 14;
+    const salV = idxSel.reduce((t, i) => { const x = B.sedes[i], q = E.p.sedes[x.n] || {}; return t + (q.salones || x.salones || 0); }, 0), frV = salV * fpsV;
+    const cupoG = (S.ds && S.ds.params && S.ds.params.generales && S.ds.params.generales.cupo) || 16;
+    const porC = (RR) => B.cursos.map((c, j) => idxSel.reduce((a, i) => { const z = RR.porCurso[i][j]; return { ga: a.ga + z.ga, act: a.act + z.act, nue: a.nue + z.nue, gn: a.gn + z.gn, ing: a.ing + z.ing }; }, { ga: 0, act: 0, nue: 0, gn: 0, ing: 0 }));
+    const pcA = porC(R), pcC = porC(RC), ingT = pcA.reduce((a, z) => a + z.ing, 0);
+    const tCur = '<div class="tw"><table class="t compact sim-t"><tr><th>Curso</th><th>Grupos nuevos ' + B.anio + '</th><th>Inscritos por grupo</th><th>Llenado del cupo</th><th>Nuevos inscritos</th><th>Grupos activos (prom.)</th><th>Ocupación de franjas</th><th>Vs ' + esc(Cmp.nombre) + '</th><th>% de ingresos</th></tr>' +
+      B.cursos.map((c, j) => { const z = pcA[j], w = pcC[j], ipg = z.gn ? z.nue / z.gn : 0, oc = frV ? z.ga / frV : 0, ocw = frV ? w.ga / frV : 0;
+        return '<tr><td>' + esc(c.c) + '</td><td>' + fN(z.gn) + '</td><td>' + nf1.format(ipg) + '</td><td>' + fP(ipg / (c.cupo || cupoG)) + '</td><td>' + fN(z.nue) + '</td><td>' + nf1.format(z.ga) + '</td><td><b>' + fP(oc) + '</b></td><td>' + dif(oc, ocw, null, fP) + '</td><td>' + fP(ingT ? z.ing / ingT : 0) + '</td></tr>'; }).join('') +
+      (() => { const t = pcA.reduce((a, z) => ({ ga: a.ga + z.ga, nue: a.nue + z.nue, gn: a.gn + z.gn }), { ga: 0, nue: 0, gn: 0 }), tw = pcC.reduce((a, z) => a + z.ga, 0);
+        return '<tr class="tot"><td>Total</td><td>' + fN(t.gn) + '</td><td>' + nf1.format(t.gn ? t.nue / t.gn : 0) + '</td><td>' + fP(t.gn ? t.nue / t.gn / cupoG : 0) + '</td><td>' + fN(t.nue) + '</td><td>' + nf1.format(t.ga) + '</td><td>' + fP(frV ? t.ga / frV : 0) + '</td><td>' + dif(frV ? t.ga / frV : 0, frV ? tw / frV : 0, null, fP) + '</td><td>100%</td></tr>'; })() + '</table></div>' +
+      '<p class="note">Ocupación de franjas por curso = grupos activos promedio del curso ÷ ' + fN(frV) + ' franjas (' + fN(salV) + ' salones × ' + fpsV + '). La suma de los cursos es la ocupación total. La mezcla de cursos y los inscritos por grupo vienen del plan de aperturas del Excel; la ocupación objetivo ' + (emp ? 'de cada sede se cambia al elegir la sede en «Ver y editar» o en Ajustes por sede, y los inscritos por grupo en Volumen y costos generales.' : 'de la sede se cambia aquí arriba y escala todos los cursos por igual.') + '</p>';
     let varHtml;
     if (emp) {
       varHtml = '<p class="lead">Lo que cambie aquí aplica a las 24 sedes, salvo las que tengan precios o costos propios. Para cambiar una sola sede, elíjala arriba en «Ver y editar».</p>' +
-        '<div class="card"><h3>Precios ' + B.anio + ': inscripción y cuotas</h3>' +
+        '<div class="card"><h3>Ocupación y volumen por curso · empresa</h3>' + tCur + '</div>' +
+        '<div class="card" style="margin-top:20px"><h3>Precios ' + B.anio + ': inscripción y cuotas</h3>' +
         (bloq ? '<p class="note" style="margin:0 0 12px">Descuento promedio: ' + fP(E.p.desc) + ' · Maquillaje al precio de los demás cursos: ' + (E.p.maqIgual ? 'sí' : 'no') + '</p>'
           : '<div class="sim-ctrl">' + lab('Aumento en la inscripción (%)', '<input type="text" inputmode="decimal" class="sim-in" id="qinsc" value="0">') + lab('Aumento en las cuotas (%)', '<input type="text" inputmode="decimal" class="sim-in" id="qcuota" value="5">') +
           '<button class="btn small" id="qaplicar">Aplicar a todos los cursos</button><span class="sim-sep"></span>' + lab('Descuento promedio (%)', inp('desc', 'pct')) + '<label class="sim-f sim-chk">' + inp('maqIgual', 'bool') + '<span>Maquillaje al precio de los demás cursos</span></label></div>') +
@@ -1187,14 +1202,16 @@
         '<h4 class="sim-h4">Resultado de los costos variables en la empresa</h4>' + sumCV(A, AC) + '</div>';
     } else {
       varHtml = '<p class="lead">Lo que cambie aquí aplica solo a ' + esc(sel) + '. Las casillas vacías siguen el valor general de la empresa; lo propio de la sede queda resaltado.</p>' +
-        '<div class="card"><h3>Precios ' + B.anio + ' en ' + esc(sel) + ': inscripción y cuotas</h3><div class="sim-ctrl">' + '<label class="sim-f sim-chk">' + inp('sedes.' + sel + '.congelar', 'bool') + '<span>Sin aumento de precio (cobra el precio 2026)</span></label></div>' +
+        '<div class="card"><h3>Volumen y ocupación en ' + esc(sel) + '</h3>' + gVol + '<h4 class="sim-h4">Ocupación por curso</h4>' + tCur + '</div>' +
+        '<div class="card" style="margin-top:20px"><h3>Precios ' + B.anio + ' en ' + esc(sel) + ': inscripción y cuotas</h3>' +
         '<div class="tw">' + tPreU + '</div><p class="note">El precio propio tiene prioridad sobre «Sin aumento». El número de pagos y el descuento son los generales. El simulador no cambia la conversión por el precio: para eso ajuste la ocupación.</p>' +
         (propiosPU && !bloq ? '<div class="sim-ctrl" style="margin-top:6px"><button class="btn ghost small" id="unarestp">Volver a los precios generales</button></div>' : '') + '</div>' +
         '<div class="card" style="margin-top:20px"><h3>Costos variables en ' + esc(sel) + '</h3>' + gVar +
         '<h4 class="sim-h4">Costo por curso en ' + esc(sel) + '</h4><p class="note" style="margin:0 0 10px">El ajuste % de la categoría se aplica encima de estos valores.</p><div class="tw">' + tCosU + '</div>' +
-        (propiosU && !bloq ? '<div class="sim-ctrl" style="margin-top:10px"><button class="btn ghost small" id="unarest">Volver a los costos generales</button>' + (qU.costos && Object.keys(qU.costos).length ? '<button class="btn ghost small" id="unarestc">Solo los costos por curso</button>' : '') + '</div>' : '') + '</div>';
+        (propiosU && !bloq ? '<div class="sim-ctrl" style="margin-top:10px"><button class="btn ghost small" id="unarest">Volver a los costos generales</button>' + (qU.costos && Object.keys(qU.costos).length ? '<button class="btn ghost small" id="unarestc">Solo los costos por curso</button>' : '') + '</div>' : '') + '</div>' +
+        '<div class="grid g-side" style="margin-top:20px"><div class="card"><h3>Gastos fijos de ' + esc(sel) + '</h3>' + gFij + '</div><div class="card" style="align-self:start"><h3>Pauta</h3>' + gPau + '</div></div>';
     }
-    const secVar = '<section class="section" id="sv-var" style="margin-top:18px"><p class="eyebrow">Variables · 01</p><h2>Precios y costos variables ' + (emp ? 'de la empresa' : 'en ' + esc(sel)) + '</h2><div class="divider"></div>' + copiaBtn + varHtml + '</section>';
+    const secVar = '<section class="section" id="sv-var" style="margin-top:18px"><p class="eyebrow">Variables · 01</p><h2>' + (emp ? 'Variables de la empresa' : 'Variables de ' + esc(sel)) + ': ocupación, precios y costos</h2><div class="divider"></div>' + copiaBtn + varHtml + '</section>';
 
     // ---- indicadores (empresa o sede)
     const fpsS = (S.ds && S.ds.params && S.ds.params.generales && S.ds.params.generales.franjasSalon) || 14;
@@ -1284,7 +1301,7 @@
     // ---- armado
     const optsEsc = cur => D.escenarios.map(e => '<option value="' + e.id + '"' + (e.id === cur ? ' selected' : '') + '>' + esc(e.nombre) + '</option>').join('');
     const optsSede = ['Todas'].concat(B.sedes.map(x => x.n)).map(n => '<option value="' + esc(n) + '"' + (n === sel ? ' selected' : '') + '>' + (n === 'Todas' ? 'Toda la empresa' : esc(n)) + '</option>').join('');
-    const secciones = [['sv-var', 'Precios y costos variables'], ['sv-ind', 'Indicadores'], ['sv-res', 'Estado de resultados'], ['sv-vol', 'Volumen y costos generales'], ['sv-una', 'Simulador por sede'], ['sv-sed', 'Ajustes por sede'], ['sv-fij', 'Gastos fijos por sede'], ['sv-men', 'Mes a mes y caja'], ['sv-psd', 'Resultado por sede'], ['sv-sen', 'Sensibilidad'], ['sv-meta', 'Meta de utilidad']];
+    const secciones = [['sv-var', 'Ocupación, precios y costos'], ['sv-ind', 'Indicadores'], ['sv-res', 'Estado de resultados'], ['sv-vol', 'Volumen y costos generales'], ['sv-sed', 'Ajustes por sede'], ['sv-fij', 'Gastos fijos por sede'], ['sv-men', 'Mes a mes y caja'], ['sv-psd', 'Resultado por sede'], ['sv-sen', 'Sensibilidad'], ['sv-meta', 'Meta de utilidad']];
     const lateral = '<nav class="side-nav" id="snav"><a href="#" class="volver" id="svolver">‹ Volver al tablero</a>' +
       '<div class="side-label">Escenarios · utilidad $M</div>' + D.escenarios.map(e => { const u = pick(simCorrer(e.p)).A.uai; return '<a href="#" class="sc-item' + (e.id === D.activo ? ' on' : '') + '" data-esc="' + e.id + '"><span>' + esc(e.nombre) + (e.bloqueado ? '' : ' <i class="sc-ed">editable</i>') + '</span><b class="' + (u < 0 ? 'down' : '') + '">' + fMn(u) + '</b></a>'; }).join('') +
       '<div class="side-label">Secciones</div>' + secciones.map(([id, t]) => '<a href="#' + id + '" data-sec="' + id + '" data-q="' + esc(norm(t)) + '">' + esc(t) + '</a>').join('') + '</nav>' +
@@ -1303,7 +1320,7 @@
       '<div class="sim-live"><span>Utilidad <b class="' + (A.uai < 0 ? 'down' : '') + '">' + fM(A.uai) + '</b></span><span>Margen <b>' + fP(A.uaiP) + '</b></span><span>Seguridad <b>' + fP(A.ms) + '</b></span><span>Ocupación <b>' + fP(ocA) + '</b></span></div></div></div>' +
       secVar + kpTitulo + kp2 + '<section class="section" id="sv-res"><p class="eyebrow">Resultados · 02</p><h2>Resultado ' + B.anio + ' frente a «' + esc(Cmp.nombre) + '»</h2><div class="divider"></div>' +
       '<div class="grid g-side"><div class="card" style="padding:0"><div class="tw">' + tRes + '</div></div><div class="card"><h3>De dónde sale la diferencia en utilidad ($ millones)</h3>' + puente + '<p class="note">Positivo suma utilidad frente a «' + esc(Cmp.nombre) + '».</p></div></div></section>' +
-      secVol + secUna + secSed + secFij + secMes + secPS + secSen + secMeta +
+      secVol + secSed + secFij + secMes + secPS + secSen + secMeta +
       '<p class="note" style="margin-top:28px">Motor: el mismo modelo de cohortes del Excel del plan (' + esc(B.archivo || 'Plan financiero ' + B.anio) + ', cargado el ' + esc(B.cargado ? new Date(B.cargado).toLocaleDateString('es-CO') : '') + '). Con las plantillas reproduce el plan base, el escenario sin kit y el acordado del 19-nov. El plan ajustado puede diferir en unos pocos millones porque el Excel redondea los grupos a números enteros.</p></main>' + footer());
     activarShell(true);
     window.scrollTo(0, y0);
