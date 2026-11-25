@@ -359,3 +359,5 @@ select.pl-in { text-align: left; width: auto; }
 .pl-nom .pl-per { width: 38%; }
 .pl-nom .pl-per .pl-nombre { margin-top: 5px; font-size: 12px; color: var(--df-ink-mid); }
 .pl-nom select.pl-in { max-width: none; min-width: 96px; }
+
+.sim-t td.own .sim-in { background: var(--df-blue-ultra, #EBF2FF); border-color: #9DBBF5; }

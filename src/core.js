@@ -521,9 +521,10 @@
   const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota209', 'Alternativa: cuota $208.950']];
 
   /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */
-  function simCostosCurso(B, p, x) {
-    const sp = B.sup, co = (p.costos || {})[x.c] || {}, fI = (1 + p.incI) / (1 + sp.incI), fS = (1 + p.incS) / (1 + sp.incS);
-    const v = (k, def) => co[k] == null ? def : co[k];
+  /** Costos unitarios de un curso. qs (opcional) = ajustes de una sede: sus costos propios por curso reemplazan a los generales. */
+  function simCostosCurso(B, p, x, qs) {
+    const sp = B.sup, co = (p.costos || {})[x.c] || {}, cs = ((qs && qs.costos) || {})[x.c] || {}, fI = (1 + p.incI) / (1 + sp.incI), fS = (1 + p.incS) / (1 + sp.incS);
+    const v = (k, def) => cs[k] != null ? cs[k] : co[k] == null ? def : co[k];
     const kit = v('kit', x.kit26 * (1 + p.incI));
     let uniforme = null, cartilla = null, insumos = null, otros;
     if (x.uni26 != null) { uniforme = v('uniforme', x.uni26 * (1 + p.incI)); cartilla = v('cartilla', x.cart26 * (1 + p.incI)); insumos = v('insumos', x.ins26 * (1 + p.incI)); otros = uniforme + cartilla + insumos; }
@@ -543,13 +544,30 @@
       const K27 = Math.max(1, Math.round(((p.pagos || {})[igual ? refMaq.c : x.c]) || x.K));
       const u = simCostosCurso(B, p, x);
       const L26 = x.p26 * (1 - p.desc), Lcong = (igual ? refMaq.p26 : x.p26) * (1 - p.desc), L27 = (pr.insc + (K27 - 1) * pr.cuota) / K27 * (1 - p.desc);
-      return { J: x.J, cum: x.cum, pm26: L26 * x.K / x.J, pmCong: Lcong * x.K / x.J, pm27: L27 * K27 / x.J, M: u.porInscrito, kit: u.kit, N: u.diploma, O: u.docente };
+      return { J: x.J, cum: x.cum, pm26: L26 * x.K / x.J, pmCong: Lcong * x.K / x.J, pm27: L27 * K27 / x.J, M: u.porInscrito, kit: u.kit, N: u.diploma, O: u.docente, pr, K27, ref: igual ? refMaq.c : x.c };
     });
-    const sed = B.sedes.map(x => { const q = p.sedes[x.n] || {}, sal = q.salones || x.salones; return { F: x.ocMotor ? (q.oc == null ? x.ocBase : q.oc) * (x.salones ? sal / x.salones : 1) / x.ocMotor : 1, kit: q.kit !== false, cong: !!q.congelar }; });
+    /** Pago mensual 2027 de un curso en una sede con precios propios (inscripción y cuota de la sede; lo que no se escriba sigue el precio general). */
+    const pmSede = (q, i) => {
+      const k = cur[i], own = (q.precios || {})[k.ref]; if (!own || (own.insc == null && own.cuota == null)) return null;
+      const insc = own.insc == null ? k.pr.insc : own.insc, cuota = own.cuota == null ? k.pr.cuota : own.cuota;
+      return (insc + (k.K27 - 1) * cuota) / k.K27 * (1 - p.desc) * k.K27 / k.J;
+    };
+    const sed = B.sedes.map(x => {
+      const q = p.sedes[x.n] || {}, sal = q.salones || x.salones, aj = q.cvAj || {};
+      // costos variables propios de la sede: por curso (reemplazan a los generales) y ajuste % por categoría encima
+      const propios = (q.costos && Object.keys(q.costos).length) || ['kit', 'ins', 'doc', 'dip'].some(k => aj[k]);
+      const cs = propios ? B.cursos.map((c, i) => {
+        const u = q.costos ? simCostosCurso(B, p, c, q) : { porInscrito: cur[i].M, kit: cur[i].kit, diploma: cur[i].N, docente: cur[i].O };
+        const kit = u.kit * (1 + (aj.kit || 0)), otros = (u.porInscrito - u.kit) * (1 + (aj.ins || 0));
+        return { M: kit + otros, kit, N: u.diploma * (1 + (aj.dip || 0)), O: u.docente * (1 + (aj.doc || 0)) };
+      }) : null;
+      const pm = q.precios && Object.keys(q.precios).length ? B.cursos.map((c, i) => pmSede(q, i)) : null;
+      return { F: x.ocMotor ? (q.oc == null ? x.ocBase : q.oc) * (x.salones ? sal / x.salones : 1) / x.ocMotor : 1, kit: q.kit !== false, cong: !!q.congelar, cs, pm };
+    });
     for (const f of B.filas) {
-      const [s, c, E, plan, G0, H0, I0] = f; const k = cur[c], q = sed[s], o = S[s];
+      const [s, c, E, plan, G0, H0, I0] = f; const q = sed[s], k = q.cs ? { ...cur[c], ...q.cs[c] } : cur[c], o = S[s];
       const G = plan ? G0 * q.F : G0, H = plan ? H0 * q.F * p.llen : H0, I = plan ? Math.min(1, I0 * p.des) : I0;
-      const pagoMes = E < 0 ? k.pm26 : q.cong ? k.pmCong : k.pm27;
+      const pagoMes = E < 0 ? k.pm26 : q.pm && q.pm[c] != null ? q.pm[c] : q.cong ? k.pmCong : k.pm27; // precio propio de la sede > sin aumento > general
       for (let u = 0; u < T; u++) {
         const kk = u - 2 - E; if (kk < 0 || kk >= k.J) continue;
         const act = H * (1 - I * k.cum[kk]);
@@ -573,7 +591,7 @@
       for (let m = 0; m < 12; m++) {
         const u = m + 2, ing = o.ing[u];
         const cv = o.cvIns[u] + o.cvKit[u] + o.cvDip[u] + o.cvDoc[u];
-        const bon = ing * tasaBon, mc = ing - cv - bon, pau = o.nue[u] * cac;
+        const bon = ing * (q.bonImp == null ? tasaBon : q.bonImp), mc = ing - cv - bon, pau = o.nue[u] * cac;
         const sh = crit === 'INGRESOS' ? (ingTot[m] ? ing / ingTot[m] : 0) : crit === 'ESTUDIANTES ACTIVOS' ? (actTot[m] ? o.act[u] / actTot[m] : 0) : 1 / NS;
         const corp = sh * corpMes, fin = sh * finMes, con = mc - fij - pau;
         M.push({ ing, cvIns: o.cvIns[u], cvKit: o.cvKit[u], cvDip: o.cvDip[u], cvDoc: o.cvDoc[u], cv, bon, mc, fij, fx: fxMes, pau, con, corp, fin, uai: con - corp - fin, nue: o.nue[u], act: o.act[u], ga: o.ga[u] });
