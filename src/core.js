@@ -530,7 +530,7 @@
     const soloCuotas = inc => B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * (1 + inc)) }; });
     if (tipo === 'ajustado') B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
     if (tipo === 'sinkit') { sinAumento(); B.sedes.forEach(x => { sedes[x.n].kit = false; }); }
-    if (tipo === 'acordado' || tipo === 'acordadoMaq' || tipo === 'cuota209' || tipo === 'final') {
+    if (tipo === 'acordado' || tipo === 'acordadoMaq' || tipo === 'cuota209' || tipo === 'final' || tipo === 'adaptado') {
       soloCuotas(sp.incP);
       B.sedes.forEach(x => { sedes[x.n].oc = x.ocAj; });
       const s = n => sedes[n] || {};
@@ -538,15 +538,20 @@
       if (sedes.Sincelejo) { const x = s('Sincelejo'); x.oc = 0.6; x.kit = false; x.congelar = true; }
       ['Venecia', 'Zipaquirá'].forEach(n => { if (sedes[n]) sedes[n].oc = 0.6; });
       if (sedes.Venecia) sedes.Venecia.salones = 4; // sede nueva: 4 salones operativos en 2027 (confirmado 25-nov)
-      if (tipo === 'acordadoMaq') p.maqIgual = true;
+      if (tipo === 'acordadoMaq' || tipo === 'adaptado') p.maqIgual = true;
       if (tipo !== 'cuota209') { const ref = (B.cursos.find(x => x.c === 'Manicure') || B.cursos[0]).p26; B.cursos.forEach(x => { precios[x.c] = { insc: x.p26, cuota: Math.round(x.p26 * 219000 / ref) }; }); }
       // precios y costos propios por sede definidos en el Excel (hoja Precios_Costos_Sede); la alternativa toma solo costos y bonificaciones
       Object.entries(B.pcSede || {}).forEach(([n, o]) => { const q = sedes[n]; if (!q) return; const c = JSON.parse(JSON.stringify(o)); if (tipo === 'cuota209') delete c.precios; Object.assign(q, c); });
     }
+    if (tipo === 'adaptado') { // plan final adaptado (25-nov): sedes críticas a 50% (o la de hoy si es mayor), maquillaje igualado; Sincelejo como en el escenario final
+      B.sedes.filter(x => x.critica).forEach(x => { const q = sedes[x.n], sal = q.salones || x.salones; q.oc = Math.max(x.ocBase * x.salones / sal, 0.5); });
+    }
     if (tipo === 'final') { // escenario final (25-nov): sedes críticas a la ocupación promedio de hoy; Sincelejo al 50%, sin kit, sin inscripción, cuotas de $189.000 y pauta al 12% de sus ventas
       const prom = B.sedes.reduce((a, x) => a + x.ocBase * x.salones, 0) / B.sedes.reduce((a, x) => a + x.salones, 0);
       B.sedes.filter(x => x.critica).forEach(x => { const q = sedes[x.n], sal = q.salones || x.salones; q.oc = Math.max(x.ocBase * x.salones / sal, prom); });
-      if (sedes.Sincelejo) {
+    }
+    if ((tipo === 'final' || tipo === 'adaptado') && sedes.Sincelejo) {
+      {
         const q = sedes.Sincelejo, i = B.sedes.findIndex(x => x.n === 'Sincelejo'); q.oc = 0.5; q.kit = false; q.precios = {}; B.cursos.forEach(c => { q.precios[c.c] = { insc: 0, cuota: 189000 }; });
         const A0 = simular(B, p).sedes[i].A; if (A0.pau > 0) q.cac = Math.round(q.cac * 0.12 * A0.ing / A0.pau);
       }
@@ -554,8 +559,8 @@
     return p;
   }
   /** Versión de las plantillas y de la convención de ocupación (2: la ocupación objetivo es sobre los salones del plan). */
-  const SIM_VERSION = 5;
-  const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota209', 'Alternativa: cuota $208.950'], ['final', 'Escenario final: ocupación real']];
+  const SIM_VERSION = 6;
+  const SIM_PLANTILLAS = [['base', 'Plan base'], ['ajustado', 'Plan ajustado'], ['sinkit', 'Sin kit y sin aumento'], ['acordado', 'Plan acordado 19-nov'], ['acordadoMaq', 'Acordado con maquillaje igualado'], ['cuota209', 'Alternativa: cuota $208.950'], ['final', 'Escenario final: ocupación real'], ['adaptado', 'Plan final adaptado']];
 
   /** Costos unitarios 2027 de un curso en el escenario: por inscrito (uniforme, kit, cartilla, insumos), diploma y docente por grupo al mes. */
   /** Costos unitarios de un curso. qs (opcional) = ajustes de una sede: sus costos propios por curso reemplazan a los generales. */
